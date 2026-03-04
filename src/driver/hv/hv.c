@@ -2,6 +2,7 @@
 #include "driver/core/hv.h"
 #include "driver/util/alloc.h"
 #include "driver/util/regs.h"
+#include "driver/util/log.h"
 #include <intrin.h>
 #include <string.h>
 
@@ -42,6 +43,9 @@ int hv_init(hv_state_t* hv) {
 
     hv_feature_register_defaults();
 
+    hv->cpu_vendor = hv_detect_cpu_vendor();
+    if (hv->cpu_vendor == HV_CPU_VENDOR_UNKNOWN) return STATUS_NOT_SUPPORTED;
+
     hv->handoff_valid = 0;
     hv->config_valid = 0;
     if (NT_SUCCESS(hv_load_efi_handoff(&hv->handoff))) {
@@ -55,9 +59,6 @@ int hv_init(hv_state_t* hv) {
     } else {
         hv_config_defaults(&hv->active_config);
     }
-
-    hv->cpu_vendor = hv_detect_cpu_vendor();
-    if (hv->cpu_vendor == HV_CPU_VENDOR_UNKNOWN) return STATUS_NOT_SUPPORTED;
 
     hv->cpu_count = hv_get_cpu_count();
     if (hv->cpu_count == 0) return STATUS_NOT_SUPPORTED;
@@ -149,15 +150,55 @@ ULONG hv_query_features_auto(void) {
 
 void hv_apply_handoff_config(hv_state_t* hv) {
     if (!hv || !hv->handoff_valid) return;
-    // base policy: if EFI config disables a feature, clear it from query
-    if (!hv->handoff.Config.EnableVmx && hv->cpu_vendor == HV_CPU_VENDOR_INTEL) {
+    thv_config_t* cfg = &hv->active_config;
+    thv_features_t* feat = &hv->handoff.Features;
+    ULONG auto_feat = hv_query_features_auto();
+
+    hv_log("[handoff] vendor=%s cfg vmx=%u svm=%u ept=%u npt=%u vpid=%u verbose=%u\n",
+           hv_cpu_vendor_str(hv->cpu_vendor),
+           cfg->EnableVmx, cfg->EnableSvm, cfg->EnableEpt, cfg->EnableNpt,
+           cfg->EnableVpid, cfg->Verbose);
+
+    if (cfg->EnableVmx && !feat->Vmx) { cfg->EnableVmx = 0; hv_log("[handoff] disable vmx: handoff feature=0\n"); }
+    if (cfg->EnableEpt && !feat->Ept) { cfg->EnableEpt = 0; hv_log("[handoff] disable ept: handoff feature=0\n"); }
+    if (cfg->EnableVpid && !feat->Vpid) { cfg->EnableVpid = 0; hv_log("[handoff] disable vpid: handoff feature=0\n"); }
+    if (cfg->EnableSvm && !feat->Svm) { cfg->EnableSvm = 0; hv_log("[handoff] disable svm: handoff feature=0\n"); }
+    if (cfg->EnableNpt && !feat->Npt) { cfg->EnableNpt = 0; hv_log("[handoff] disable npt: handoff feature=0\n"); }
+
+    if (cfg->EnableVmx && !(auto_feat & HV_FEAT_VMX)) { cfg->EnableVmx = 0; hv_log("[handoff] disable vmx: cpu reports unsupported\n"); }
+    if (cfg->EnableEpt && !(auto_feat & HV_FEAT_EPT)) { cfg->EnableEpt = 0; hv_log("[handoff] disable ept: cpu reports unsupported\n"); }
+    if (cfg->EnableVpid && !(auto_feat & HV_FEAT_VPID)) { cfg->EnableVpid = 0; hv_log("[handoff] disable vpid: cpu reports unsupported\n"); }
+    if (cfg->EnableSvm && !(auto_feat & HV_FEAT_SVM)) { cfg->EnableSvm = 0; hv_log("[handoff] disable svm: cpu reports unsupported\n"); }
+    if (cfg->EnableNpt && !(auto_feat & HV_FEAT_NPT)) { cfg->EnableNpt = 0; hv_log("[handoff] disable npt: cpu reports unsupported\n"); }
+
+    if (hv->cpu_vendor != HV_CPU_VENDOR_INTEL && cfg->EnableVmx) {
+        cfg->EnableVmx = 0;
+        cfg->EnableEpt = 0;
+        cfg->EnableVpid = 0;
+        hv_log("[handoff] disable vmx/ept/vpid: non-intel vendor\n");
+    }
+    if (hv->cpu_vendor != HV_CPU_VENDOR_AMD && cfg->EnableSvm) {
+        cfg->EnableSvm = 0;
+        cfg->EnableNpt = 0;
+        hv_log("[handoff] disable svm/npt: non-amd vendor\n");
+    }
+
+    hv_config_validate(cfg);
+
+    hv->ept_enabled = cfg->EnableEpt ? 1 : 0;
+    hv->npt_enabled = cfg->EnableNpt ? 1 : 0;
+
+    if (hv->cpu_vendor == HV_CPU_VENDOR_INTEL && !cfg->EnableVmx) {
+        hv_log("[handoff] vmx disabled; suppressing intel launch\n");
         hv->cpu_vendor = HV_CPU_VENDOR_UNKNOWN;
     }
-    if (!hv->handoff.Config.EnableSvm && hv->cpu_vendor == HV_CPU_VENDOR_AMD) {
+    if (hv->cpu_vendor == HV_CPU_VENDOR_AMD && !cfg->EnableSvm) {
+        hv_log("[handoff] svm disabled; suppressing amd launch\n");
         hv->cpu_vendor = HV_CPU_VENDOR_UNKNOWN;
     }
-    hv->ept_enabled = hv->handoff.Config.EnableEpt ? 1 : 0;
-    hv->npt_enabled = hv->handoff.Config.EnableNpt ? 1 : 0;
+
+    hv_log("[handoff] applied cfg vmx=%u svm=%u ept=%u npt=%u vpid=%u\n",
+           cfg->EnableVmx, cfg->EnableSvm, cfg->EnableEpt, cfg->EnableNpt, cfg->EnableVpid);
 }
 
 int hv_cpu_is_intel(hv_state_t* hv) {
