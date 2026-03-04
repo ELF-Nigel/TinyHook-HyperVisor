@@ -1,3 +1,5 @@
+## EFI IS BROKEN AT THE MOMENT EVEN THOUGH IT BUILDS - CHAINLOAD FAILS
+
 # elf hypervisor
 
 See `docs/README.md` for full documentation.
