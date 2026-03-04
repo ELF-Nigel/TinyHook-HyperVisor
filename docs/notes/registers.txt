@@ -1,0 +1,130 @@
+union CR0 {
+	struct {
+		ULONG64 PE : 1; // [0]
+		ULONG64 MP : 1; // [1]
+		ULONG64 EM : 1; // [2]
+		ULONG64 TS : 1; // [3]
+		ULONG64 ET : 1; // [4]
+		ULONG64 NE : 1; // [5]
+		ULONG64 Reserved : 10; // [6:15]
+		ULONG64 WP : 1; // [16]
+		ULONG64 Reserved2 : 1; // [17]
+		ULONG64 AM : 1; // [18]
+		ULONG64 Reserved3 : 10; // [19:28]
+		ULONG64 NW : 1; // [29]
+		ULONG64 CD : 1; // [30]
+		ULONG64 PG : 1; // [31]
+		ULONG64 Reserved4 : 32; // [32 : 63]
+	} Fields;
+	UINT64 Contents;
+};
+static_assert(sizeof(CR0) == sizeof(PVOID));
+
+union CR3 {
+	struct {
+		// If ProcessContextIdentifier & 0xFE7 != 0 and CR4.PCIDE = 0, return.
+		ULONG64 ProcessContextIdentifier : 12; // [0:11]
+		ULONG64 PageMapLevel4BaseAddress : 40; // [12:51]
+		ULONG64 Reserved : 12; // [52:63]
+	} Fields;
+	UINT64 Contents;
+};
+static_assert(sizeof(CR3) == sizeof(PVOID));
+
+union CR4 {
+	struct {
+		ULONG64 VME : 1;
+		ULONG64 PVI : 1;
+		ULONG64 TSD : 1;
+		ULONG64 DE : 1;
+		ULONG64 PSE : 1;
+		ULONG64 PAE : 1;
+		ULONG64 MCE : 1;
+		ULONG64 PGE : 1;
+		ULONG64 PCE : 1;
+		ULONG64 OSFXSR : 1;
+		ULONG64 OSXMMEXCPT : 1;
+		ULONG64 UMIP : 1;
+		ULONG64 LA57 : 1;
+		ULONG64 Reserved : 3;
+		ULONG64 FSGSBASE : 1;
+		ULONG64 PCIDE : 1;
+		ULONG64 OSXSAVE : 1;
+		ULONG64 Reserved2 : 1;
+		ULONG64 SMEP : 1;
+		ULONG64 SMAP : 1;
+		ULONG64 PKE : 1;
+		ULONG64 CET : 1;
+		ULONG64 Reserved3 : 40;
+	} Fields;
+	UINT64 Contents;
+};
+static_assert(sizeof(CR4) == sizeof(PVOID));
+
+union RFLAGS {
+	struct {
+		ULONG64 CF : 1;
+		ULONG64 Reserved : 1;
+		ULONG64 PF : 1;
+		ULONG64 Reserved2 : 1;
+		ULONG64 AF : 1;
+		ULONG64 Reserved3 : 1;
+		ULONG64 ZF : 1;
+		ULONG64 SF : 1;
+		ULONG64 TF : 1;
+		ULONG64 IF : 1;
+		ULONG64 DF : 1;
+		ULONG64 OF : 1;
+		ULONG64 IOPL : 2;
+		ULONG64 NT : 1;
+		ULONG64 Reserved4 : 1;
+		ULONG64 RF : 1;
+		ULONG64 VM : 1;
+		ULONG64 AC : 1;
+		ULONG64 VIF : 1;
+		ULONG64 VIP : 1;
+		ULONG64 ID : 1;
+		ULONG64 Reserved5 : 42;
+	} Fields;
+	UINT64 Contents;
+};
+static_assert(sizeof(RFLAGS) == sizeof(PVOID));
+
+union MSR_EFER {
+	ULONG64 Contents;
+	struct {
+		ULONG64 SCE : 1; // System Call Extensions
+		ULONG64 Reserved : 7;
+		ULONG64 LME : 1; // Long Mode Enabled
+		ULONG64 Reserved2 : 1;
+		ULONG64 LMA : 1; // Long Mode Active
+		ULONG64 NXE : 1; // No Execute Enable
+		ULONG64 SVME : 1; // Secure Virtual Machine Enable
+		ULONG64 LMSLE : 1; // Long Mode Segmant Limit Enable
+		ULONG64 FFXSR : 1; // Fast FXSAVE/FXRSTOR 
+		ULONG64 TCE : 1; // Translation Cache Extension 
+		ULONG64 Reserved3 : 1;
+		ULONG64 MCOMMIT : 1; // Enable MCOMMIT instruction
+		ULONG64 INTWB : 1; // Interruptible WBINVD / WBNOINVD enable
+		ULONG64 Reserved4 : 1;
+		ULONG64 UAIE : 1; // Upper Address Ignore Enable
+		ULONG64 AIBRSE : 1; // Automatic IBRS Enable
+		ULONG64 Reserved5 : 42;
+	} Fields;
+};
+static_assert(sizeof(MSR_EFER) == sizeof(PVOID));
+
+union PageFaultErrorCode {
+	struct {
+		UINT32 Present : 1;
+		UINT32 Write : 1;
+		UINT32 Supervisor : 1;
+		UINT32 ReservedFault : 1;
+		UINT32 InstructionFetch : 1;
+		UINT32 ProtectionKeyViolation : 1;
+		UINT32 ShadowStackAccess : 1;
+		UINT32 Reserved : 24;
+		UINT32 RMP : 1;
+	} Fields;
+	UINT32 Contents;
+};

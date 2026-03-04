@@ -1,0 +1,275 @@
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\public">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\driver">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\driver\arch">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\driver\core">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\driver\util">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\driver\hooks">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="include\driver\control">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\api">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\arch">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\arch\svm">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\arch\svm\core">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\arch\vmx">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\arch\vmx\core">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\hooks">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\hv">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\control">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\util">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\tools">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src/api/elfhv.c">
+      <Filter>src\api</Filter>
+    </ClCompile>
+    <ClCompile Include="src/tools/hvctl.c">
+      <Filter>src\tools</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hooks/hook.c">
+      <Filter>src\driver\hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hooks/hook_ext.c">
+      <Filter>src\driver\hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hooks/hook_more.c">
+      <Filter>src\driver\hooks</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/hv.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/feature.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/dpc.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/control/control.c">
+      <Filter>src\driver\control</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/handoff.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/translate.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/stats.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/cpuid.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/msr.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/control_reg.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/hv/state.c">
+      <Filter>src\driver\hv</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/util/ringlog.c">
+      <Filter>src\driver\util</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/vmx.c">
+      <Filter>src\driver\arch\vmx</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/ept.c">
+      <Filter>src\driver\arch\vmx</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/svm.c">
+      <Filter>src\driver\arch\svm</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/npt.c">
+      <Filter>src\driver\arch\svm</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/driver_entry.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/diag.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/hypercall.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/manager.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/map.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/vmexit.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/svm/core/write.c">
+      <Filter>src\driver\arch\svm\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/driver_entry.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/diag.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/hypercall.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/manager.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/map.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/vmexit.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src/driver/arch/vmx/core/write.c">
+      <Filter>src\driver\arch\vmx\core</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include/public/elfhv.h">
+      <Filter>include\public</Filter>
+    </ClInclude>
+    <ClInclude Include="include/public/hv_control.h">
+      <Filter>include\public</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/hv.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/state.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/feature.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/cpuid.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/msr.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/control_reg.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/control/control.h">
+      <Filter>include\driver\control</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/arch/vmx.h">
+      <Filter>include\driver\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/arch/svm.h">
+      <Filter>include\driver\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/arch/ept.h">
+      <Filter>include\driver\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/arch/vmcs.h">
+      <Filter>include\driver\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/stats.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/alloc.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/log.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/ringlog.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/diag.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/hooks/hook.h">
+      <Filter>include\driver\hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/hooks/hook_ext.h">
+      <Filter>include\driver\hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/hooks/hook_more.h">
+      <Filter>include\driver\hooks</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/hypercall.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/manager.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/write.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/map.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/vmexit.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/translate.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/paging.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/arch/npt.h">
+      <Filter>include\driver\arch</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/lock.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/util/regs.h">
+      <Filter>include\driver\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/handoff.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+    <ClInclude Include="include/driver/core/dpc.h">
+      <Filter>include\driver\core</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

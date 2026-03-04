@@ -1,0 +1,42 @@
+[Defines]
+  INF_VERSION                    = 0x0001001B
+  BASE_NAME                      = elfhv
+  FILE_GUID                      = 0C1B7C9F-2C0B-4F6F-A26C-9CF0A0F3A7B6
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 0.1
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  Boot.c
+  BootLog.c
+  BootMenu.c
+  ConfigFile.c
+  Cpu.c
+  Features.c
+  Config.c
+  Handoff.c
+  ConfigWriter.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  elfhvPkg/elfhvPkg.dec
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  UefiLib
+  UefiBootServicesTableLib
+  UefiRuntimeServicesTableLib
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  PrintLib
+  MemoryAllocationLib
+  DevicePathLib
+
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+  gEfiSimpleFileSystemProtocolGuid
+  gEfiTcg2ProtocolGuid
+
+[Guids]
+  gEfiFileInfoGuid

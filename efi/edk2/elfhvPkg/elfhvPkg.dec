@@ -1,0 +1,11 @@
+## @file
+#  elf hypervisor package
+##
+[Defines]
+  DEC_SPECIFICATION              = 0x0001001B
+  PACKAGE_NAME                   = elfhvPkg
+  PACKAGE_GUID                   = 8D1B552E-6C9E-4EE6-9E49-8E3BA5E2E2C7
+  PACKAGE_VERSION                = 0.1
+
+[Includes]
+  Boot

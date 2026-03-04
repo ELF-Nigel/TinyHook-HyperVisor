@@ -1,0 +1,75 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: compile usermode stub and controller
+        shell: cmd
+        run: |
+          echo #include "include\public\elfhv.h" > test.cpp
+          echo int main(){return 0;} >> test.cpp
+          cl /nologo /W4 /EHsc /D elfhv_usermode /I include /I include\public test.cpp src\api\elfhv.c
+          cl /nologo /W4 /I include /I include\public src\tools\hvctl.c
+
+  build-efi:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential uuid-dev nasm iasl python3
+      - name: build edk2 base tools
+        run: |
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; sleep 5; done; return 1; }
+          retry curl -L -o edk2.tar.gz https://github.com/tianocore/edk2/archive/refs/tags/edk2-stable202402.tar.gz
+          mkdir -p edk2
+          tar -xzf edk2.tar.gz --strip-components=1 -C edk2
+          retry curl -L -o brotli.tar.gz https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz
+          retry git -c http.lowSpeedLimit=0 -c http.lowSpeedTime=999999 clone --depth 1 https://github.com/MIPI-Alliance/public-mipi-sys-t.git mipisyst-src
+          mkdir -p edk2/BaseTools/Source/C/BrotliCompress/brotli
+          mkdir -p edk2/MdeModulePkg/Library/BrotliCustomDecompressLib/brotli
+          tar -xzf brotli.tar.gz --strip-components=1 -C edk2/BaseTools/Source/C/BrotliCompress/brotli
+          tar -xzf brotli.tar.gz --strip-components=1 -C edk2/MdeModulePkg/Library/BrotliCustomDecompressLib/brotli
+          mkdir -p edk2/MdePkg/Library/MipiSysTLib/mipisyst
+          cp -R mipisyst-src/* edk2/MdePkg/Library/MipiSysTLib/mipisyst/
+          make -C edk2/BaseTools
+      - name: build tinyhook hv efi
+        run: |
+          export PACKAGES_PATH="${GITHUB_WORKSPACE}/edk2:${GITHUB_WORKSPACE}/efi/edk2"
+          export EDK_TOOLS_PATH="${GITHUB_WORKSPACE}/edk2/BaseTools"
+          source edk2/edksetup.sh BaseTools
+          build -a X64 -t GCC5 -b RELEASE -p elfhvPkg/elfhvPkg.dsc
+      - name: stage efi artifact
+        run: |
+          mkdir -p build
+          cp -p Build/elfhvPkg/RELEASE_GCC5/X64/*.efi build/elfhv.efi
+      - name: commit efi build
+        run: |
+          git config user.name "ELF-Nigel"
+          git config user.email "ELF-Nigel@users.noreply.github.com"
+          git add build/elfhv.efi
+          if git diff --cached --quiet; then
+            echo "no efi changes to commit"
+            exit 0
+          fi
+          git commit -m "ci: update build/elfhv.efi"
+          git push
+      - name: upload efi artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tinyhookhv-efi
+          path: |
+            build/*.efi

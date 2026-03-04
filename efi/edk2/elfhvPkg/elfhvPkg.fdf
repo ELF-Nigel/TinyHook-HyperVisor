@@ -1,0 +1,18 @@
+## @file
+#  elf hypervisor firmware layout
+##
+[FD.elfhvFd]
+BaseAddress   = 0x00000000
+Size          = 0x00400000
+ErasePolarity = 1
+BlockSize     = 0x00001000
+NumBlocks     = 0x400
+
+[FV.elfhvFv]
+FvAlignment = 8
+ERASE_POLARITY = 1
+MEMORY_MAPPED = TRUE
+BLOCK_SIZE = 0x1000
+NUM_BLOCKS = 0x400
+
+INF  elfhvPkg/Boot/Boot.inf

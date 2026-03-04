@@ -1,0 +1,125 @@
+# elf hypervisor
+
+See `docs/README.md` for full documentation.
+
+## Temporary Changelog
+- per-vcpu initialization now happens before `hv_start`, with hard-fail on any vcpu init failure.
+- page-aligned allocation helpers added, plus guards for alignment and zero physical addresses.
+- cpu vendor detection (intel/amd) gates vmx/svm paths.
+- ioctls removed; hypercore lifecycle is kernel-only.
+- added host/guest memory translation helpers (host hva↔hpa, gva→gpa stubs).
+- added io/cpuid intercept tables and basic svm npt helpers.
+- added spinlock wrapper and guarded manager tables.
+- added per-cpu register snapshot (cr0/cr3/cr4/efer).
+- enforced per-core svm init checks for npt tables.
+- added control register and rflags bitfield unions.
+- expanded svm npt tables to build per-range mappings.
+- added cr3 union read helper in cpu snapshot.
+- added cr3 resolvers and svm guest save-state capture fields.
+- enforced passive-level checks in svm npt setup/build (not required for shutdown).
+- added npt physical range sync helper.
+- ensure npt pt tables are initialized before pte access.
+- allocate npt pt entries per physical range and wire them into pdp/pd slots.
+- fixed broken hv_log string literals.
+- added passive-level assert, page-align helper, zero-struct helper, cpu vendor string, and feature flags.
+- added vm-exit handler registry and dispatch table.
+- added ring-buffer vm-exit trace helper.
+- added ept/npt permission helper stubs.
+- added feature flag auto-detection helper.
+- added ring-buffer trace read/reset helpers.
+- added edk2 bootloader scaffold under efi/edk2.
+- added efi handoff variable writer and kernel handoff reader.
+- added efi config writer and kernel handoff apply hook.
+- added handoff crc32 and size validation.
+- added vm-exit histogram stats and top-reasons helper.
+- added 15 small helpers (stats reset/snapshot, trace capacity, config defaults/validate, feature checks, manager queries, npt getters, safe memcpy).
+- added 15 more helpers (trace count/peek, stats reason get/reset, manager clear-all, npt is_mapped, config flags, min/max, vpid config).
+- added ept map/unmap helpers and invept/invvpid stubs.
+- expanded hook/ept/npt/vmx/svm stub layouts with parameter validation and clear fill-in steps.
+- added per-cpu dpc helper skeletons for init/shutdown sequencing.
+- added edk2 cpu vendor and feature detection helpers.
+- reorganized `include/driver` into arch/core/util/hooks subfolders and updated includes + vs filters.
+- wired vm-exit handler registry into vmx/svm dispatch paths.
+- added and marked compatibility layer task for windows + gpu paths.
+- added gva->gpa cache with large-page awareness and wired registry-first comments.
+- added per-cpu init sequencing with dpc ping + affinity pinning.
+- added persistent trace ring export via named shared section for usermode.
+- added vm-exit stats export section for per-reason counters.
+- added tpm measurement hook for handoff buffer in efi bootloader.
+- added simple efi config ui (f1 to toggle options).
+- hardened efi ci clone with retries for edk2 submodules.
+- limited edk2 ci submodules to required brotli deps to avoid nested openssl failures.
+- switched ci to edk2 stable tarball to avoid submodule recursion failures.
+- inject brotli sources in ci when using edk2 tarball.
+- added ci job to build edk2 efi and upload artifacts.
+- added hv control device (\\device\\hvcontrol) with versioned ioctls and staged-only config updates.
+- added non-operational feature registry with 20 default feature entries.
+- added feature list ioctl and hvctl feature listing.
+- added non-operational hv state machine helper.
+- added non-operational cpuid/msr/cr monitoring policies with vmexit telemetry counters.
+- added hv ring log buffer and ioctls for exit stats + hv log snapshots.
+
+## TODO (Next Code Tasks)
+- [x] implement real ept map/unmap helpers and invept/invpid stubs.
+- [x] implement npt invalidation (invlpga) and permissions flush flow.
+- [x] add version/gpu compatibility layer (signature registry + resolver fallback for windows + gpu swapchain paths).
+- [x] wire vm-exit handler registry to actual vmcs/vmcb exit paths.
+- [x] finish gva->gpa walkers with caching and large-page handling.
+- [x] add per-cpu init sequencing using dpc helpers.
+- [x] add persistent ring-buffer logging (export to usermode safely).
+- [x] add vm-exit stats per-reason export API.
+- [x] add secure boot chain measurement (TPM event log).
+- [x] add config UI in EFI (simple key-toggle menu).
+- add handoff-to-kernel apply policy (feature gating and logging).
+- add EFI config variable sanity checker and recovery defaults.
+- add minimal ACPI table handoff (metadata only).
+- add per-cpu watchdog for launch failures.
+- add unit-test style self-checks for alloc and paging helpers.
+- add vmexit reason string table for diagnostics.
+- add io/cpuid table export helpers for debugging.
+- add vfio-like safe mapping layer for test builds (dev only).
+- add guard pages around vmcs/vmcb allocations.
+- add per-cpu feature mask to gate mixed vendor scenarios.
+- add winload chainload smoke-test harness (dev only, no hooks).
+- add vmexit latency histogram and percentile export.
+- add trace ring rate limiting and backpressure counters.
+- add integrity hash for handoff + config variables at runtime.
+- add per-cpu vmx/svm launch retry with exponential backoff.
+- add guest-physical memory map snapshot export (sanitized).
+- add per-cpu state dump on launch failure (struct + last error).
+- add EFI config menu timeout + default action.
+- add static analyzer annotations for driver entry and memory map helpers.
+- add per-cpu vmexit ring snapshots on panic.
+- add low-memory fallback path for alloc helpers.
+- add trace ring compression option (delta-encoded timestamps).
+- add module signature whitelist for resolver framework.
+- add vmcs/vmcb version detection sanity check.
+- add per-cpu feature mismatch report at init.
+- add secure wipe for shared sections on shutdown.
+- add hv self-test mode (minimal vmexit smoke test).
+- add vmexit reason allow/deny policy table.
+- add per-cpu stats sampling interval config.
+- add ept/npt page permission audit logger (debug-only).
+- add vmexit suppression list for noisy reasons.
+- add cpu topology snapshot (group, core, logical mapping).
+- add perf counters for ept/npt violations.
+- add optional debug pause on bootloader menu.
+
+## Ideas (Future Additions)
+- vmcs/vmcb field dump helpers with typed accessors.
+- ept/npt split large-page helpers (2MB/1GB).
+- cpuid/msr/io intercept policy tables with allow/deny modes.
+- panic-safe shutdown path for failed vmx/svm launch.
+- fast path for hot add/remove of npt entries.
+- optional secure erase of vmcs/vmcb pages on shutdown.
+- minimal perf counters for vmexit latency.
+- EFI config UI theme + timeout option.
+- config profile presets (safe/perf/debug).
+- optional memory map diffing between boots.
+- structured log sink to file on EFI system partition.
+- usermode dashboard for live trace/stats visualization.
+- automated signature update pipeline with CI validation.
+- optional fuzz harness for vmexit handler table.
+- opt-in secure channel for EFI→kernel handoff attestation.
+- per-vcpu performance budget and throttling policy.
+- crash dump annotator for vmexit state.

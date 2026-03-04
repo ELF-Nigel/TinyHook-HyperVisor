@@ -1,0 +1,114 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{0B0C8F1E-2C7F-4A3C-9E9F-6B9B4E1A2C3D}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectName>elf-hypervisor</ProjectName>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <ItemGroup>
+    <ClCompile Include="src/api/elfhv.c" />
+    <ClCompile Include="src/tools/hvctl.c" />
+    <ClCompile Include="src/driver/hooks/hook.c" />
+    <ClCompile Include="src/driver/hooks/hook_ext.c" />
+    <ClCompile Include="src/driver/hooks/hook_more.c" />
+    <ClCompile Include="src/driver/hv/hv.c" />
+    <ClCompile Include="src/driver/hv/feature.c" />
+    <ClCompile Include="src/driver/hv/dpc.c" />
+    <ClCompile Include="src/driver/control/control.c" />
+    <ClCompile Include="src/driver/hv/handoff.c" />
+    <ClCompile Include="src/driver/hv/translate.c" />
+    <ClCompile Include="src/driver/hv/stats.c" />
+    <ClCompile Include="src/driver/hv/cpuid.c" />
+    <ClCompile Include="src/driver/hv/msr.c" />
+    <ClCompile Include="src/driver/hv/control_reg.c" />
+    <ClCompile Include="src/driver/hv/state.c" />
+    <ClCompile Include="src/driver/util/ringlog.c" />
+    <ClCompile Include="src/driver/arch/vmx/vmx.c" />
+    <ClCompile Include="src/driver/arch/vmx/ept.c" />
+    <ClCompile Include="src/driver/arch/svm/svm.c" />
+    <ClCompile Include="src/driver/arch/svm/npt.c" />
+    <ClCompile Include="src/driver/arch/svm/core/driver_entry.c" />
+    <ClCompile Include="src/driver/arch/svm/core/diag.c" />
+    <ClCompile Include="src/driver/arch/svm/core/hypercall.c" />
+    <ClCompile Include="src/driver/arch/svm/core/manager.c" />
+    <ClCompile Include="src/driver/arch/svm/core/map.c" />
+    <ClCompile Include="src/driver/arch/svm/core/vmexit.c" />
+    <ClCompile Include="src/driver/arch/svm/core/write.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/driver_entry.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/diag.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/hypercall.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/manager.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/map.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/vmexit.c" />
+    <ClCompile Include="src/driver/arch/vmx/core/write.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include/public/elfhv.h" />
+    <ClInclude Include="include/public/hv_control.h" />
+    <ClInclude Include="include/driver/core/hv.h" />
+    <ClInclude Include="include/driver/core/state.h" />
+    <ClInclude Include="include/driver/core/feature.h" />
+    <ClInclude Include="include/driver/core/cpuid.h" />
+    <ClInclude Include="include/driver/core/msr.h" />
+    <ClInclude Include="include/driver/core/control_reg.h" />
+    <ClInclude Include="include/driver/control/control.h" />
+    <ClInclude Include="include/driver/arch/vmx.h" />
+    <ClInclude Include="include/driver/arch/svm.h" />
+    <ClInclude Include="include/driver/arch/ept.h" />
+    <ClInclude Include="include/driver/arch/vmcs.h" />
+    <ClInclude Include="include/driver/core/stats.h" />
+    <ClInclude Include="include/driver/util/alloc.h" />
+    <ClInclude Include="include/driver/util/log.h" />
+    <ClInclude Include="include/driver/util/ringlog.h" />
+    <ClInclude Include="include/driver/core/diag.h" />
+    <ClInclude Include="include/driver/hooks/hook.h" />
+    <ClInclude Include="include/driver/hooks/hook_ext.h" />
+    <ClInclude Include="include/driver/hooks/hook_more.h" />
+    <ClInclude Include="include/driver/core/hypercall.h" />
+    <ClInclude Include="include/driver/core/manager.h" />
+    <ClInclude Include="include/driver/core/write.h" />
+    <ClInclude Include="include/driver/util/map.h" />
+    <ClInclude Include="include/driver/core/vmexit.h" />
+    <ClInclude Include="include/driver/util/translate.h" />
+    <ClInclude Include="include/driver/util/paging.h" />
+    <ClInclude Include="include/driver/arch/npt.h" />
+    <ClInclude Include="include/driver/util/lock.h" />
+    <ClInclude Include="include/driver/util/regs.h" />
+    <ClInclude Include="include/driver/core/handoff.h" />
+    <ClInclude Include="include/driver/core/dpc.h" />
+  </ItemGroup>
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>include;include/public;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
