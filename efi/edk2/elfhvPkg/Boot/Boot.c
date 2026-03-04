@@ -15,7 +15,7 @@
 #include "BootMenu.h"
 #include "BootLog.h"
 
-static EFI_GUID gElfBootStatusGuid = { 0x4c7aaf1d, 0x8f1f, 0x4a0b, {0x9e,0x34,0x52,0x8e,0x21,0x46,0x12,0xa9} };
+EFI_GUID gElfBootStatusGuid = { 0x4c7aaf1d, 0x8f1f, 0x4a0b, {0x9e,0x34,0x52,0x8e,0x21,0x46,0x12,0xa9} };
 
 typedef enum {
   HV_STAGE_NONE = 0,
@@ -223,28 +223,31 @@ LoadAndStartImage(EFI_HANDLE ImageHandle, EFI_HANDLE* OutHandle, CONST CHAR16* P
   EFI_FILE_PROTOCOL* File;
   EFI_DEVICE_PATH_PROTOCOL* DevicePath;
 
+  BootLogAdd(L"[boot] chainload locate: %s", Path);
   Status = gBS->HandleProtocol(ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage);
-  if (EFI_ERROR(Status)) return Status;
+  if (EFI_ERROR(Status)) { BootLogAdd(L"[boot] chainload failed: loaded image %r", Status); return Status; }
 
   Status = gBS->HandleProtocol(LoadedImage->DeviceHandle, &gEfiSimpleFileSystemProtocolGuid, (VOID**)&Sfsp);
-  if (EFI_ERROR(Status)) return Status;
+  if (EFI_ERROR(Status)) { BootLogAdd(L"[boot] chainload failed: fs protocol %r", Status); return Status; }
 
   Status = Sfsp->OpenVolume(Sfsp, &Root);
-  if (EFI_ERROR(Status)) return Status;
+  if (EFI_ERROR(Status)) { BootLogAdd(L"[boot] chainload failed: open volume %r", Status); return Status; }
 
   Status = Root->Open(Root, &File, (CHAR16*)Path, EFI_FILE_MODE_READ, 0);
   if (EFI_ERROR(Status)) {
     Root->Close(Root);
+    BootLogAdd(L"[boot] chainload failed: open file %r", Status);
     return Status;
   }
 
   DevicePath = FileDevicePath(LoadedImage->DeviceHandle, (CHAR16*)Path);
   File->Close(File);
   Root->Close(Root);
-  if (!DevicePath) return EFI_NOT_FOUND;
+  if (!DevicePath) { BootLogAdd(L"[boot] chainload failed: device path not found"); return EFI_NOT_FOUND; }
 
+  BootLogAdd(L"[boot] chainload load image");
   Status = gBS->LoadImage(FALSE, ImageHandle, DevicePath, NULL, 0, OutHandle);
-  if (EFI_ERROR(Status)) return Status;
+  if (EFI_ERROR(Status)) { BootLogAdd(L"[boot] chainload failed: load image %r", Status); return Status; }
 
   EFI_LOADED_IMAGE_PROTOCOL* ChildImage = NULL;
   if (!EFI_ERROR(gBS->HandleProtocol(*OutHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&ChildImage)) && ChildImage) {
@@ -255,7 +258,11 @@ LoadAndStartImage(EFI_HANDLE ImageHandle, EFI_HANDLE* OutHandle, CONST CHAR16* P
     Print(L"device       : %p\n", ChildImage->DeviceHandle);
   }
 
-  return gBS->StartImage(*OutHandle, NULL, NULL);
+  BootLogAdd(L"[boot] chainload start image");
+  Status = gBS->StartImage(*OutHandle, NULL, NULL);
+  if (EFI_ERROR(Status)) { BootLogAdd(L"[boot] chainload failed: start image %r", Status); return Status; }
+  BootLogAdd(L"[boot] chainload transfer complete");
+  return Status;
 }
 
 
@@ -313,6 +320,7 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE* SystemTable) {
   BOOLEAN config_loaded = !EFI_ERROR(LoadConfigFile(ImageHandle, &Handoff->Config));
 
   if (!EFI_ERROR(RunConfigMenu(ImageHandle, Handoff))) {
+    BootLogAdd(L"[boot] config commit requested");
     WriteConfigVariable(&Handoff->Config);
     RecalcHandoffCrc(Handoff);
     BootLogAdd(L"[boot] config saved");
@@ -380,6 +388,7 @@ UefiMain(IN EFI_HANDLE ImageHandle, IN EFI_SYSTEM_TABLE* SystemTable) {
   EFI_HANDLE NextImage = NULL;
   Status = LoadAndStartImage(ImageHandle, &NextImage, L"\\EFI\\Microsoft\\Boot\\bootmgfw.efi");
   if (EFI_ERROR(Status)) {
+    BootLogAdd(L"[boot] chainload fallback: bootmgfw failed");
     Status = LoadAndStartImage(ImageHandle, &NextImage, L"\\EFI\\Boot\\bootx64.efi");
   }
 

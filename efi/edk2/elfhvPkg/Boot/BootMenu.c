@@ -10,54 +10,47 @@
 #include "Boot.h"
 #include "BootLog.h"
 
-#define UI_NAV_WIDTH 28
 #define UI_HEADER_HEIGHT 6
 #define UI_FOOTER_HEIGHT 2
-#define UI_MAX_CONTENT_ITEMS 24
+#define UI_MAX_CONTENT_ITEMS 32
+#define UI_MAX_PAGE_STACK 8
 
 typedef enum {
-  UI_FOCUS_NAV = 0,
-  UI_FOCUS_CONTENT = 1
-} UI_FOCUS;
-
-typedef enum {
-  UI_PAGE_DASHBOARD = 0,
+  UI_PAGE_MAIN = 0,
+  UI_PAGE_FEATURES,
   UI_PAGE_HV_CONFIG,
-  UI_PAGE_VMEXIT,
-  UI_PAGE_MEMORY,
-  UI_PAGE_HOOKS,
-  UI_PAGE_SECURITY,
-  UI_PAGE_DEBUG,
-  UI_PAGE_SYSTEM,
-  UI_PAGE_BOOT,
+  UI_PAGE_STATUS,
   UI_PAGE_LOGS,
   UI_PAGE_COUNT
 } UI_PAGE;
 
 typedef enum {
-  UI_OPT_TOGGLE,
-  UI_OPT_ENUM,
-  UI_OPT_NUMBER,
-  UI_OPT_ACTION,
-  UI_OPT_READONLY
-} UI_OPT_KIND;
+  UI_ITEM_SUBPAGE,
+  UI_ITEM_TOGGLE,
+  UI_ITEM_ENUM,
+  UI_ITEM_NUMBER,
+  UI_ITEM_ACTION,
+  UI_ITEM_READONLY
+} UI_ITEM_KIND;
 
 typedef struct {
   const CHAR16* Label;
-  UI_OPT_KIND Kind;
+  UI_ITEM_KIND Kind;
   UINT8* Value;
   UINT8 Min;
   UINT8 Max;
   UINT8 Step;
   const CHAR16** EnumLabels;
   UINTN EnumCount;
+  UI_PAGE SubPage;
   EFI_STATUS (*Action)(VOID* Context);
-} UI_OPTION;
+} UI_MENU_ITEM;
 
 typedef struct {
-  const CHAR16* Label;
-  UI_PAGE Page;
-} UI_NAV_ITEM;
+  const CHAR16* Title;
+  UI_MENU_ITEM* Items;
+  UINTN Count;
+} UI_MENU_PAGE;
 
 typedef struct {
   UINT8 EnableNested;
@@ -77,17 +70,28 @@ typedef struct {
   UINT8 PresetId;
 } UI_CONFIG;
 
+typedef enum {
+  UI_ACTION_NONE = 0,
+  UI_ACTION_BOOT,
+  UI_ACTION_BOOT_NO_HV,
+  UI_ACTION_RELOAD,
+  UI_ACTION_RESET,
+  UI_ACTION_SHUTDOWN
+} UI_ACTION;
+
 typedef struct {
   EFI_HANDLE ImageHandle;
   THV_HANDOFF* Handoff;
   THV_CONFIG* Config;
   UI_CONFIG UiConfig;
-  UI_PAGE ActivePage;
-  UI_FOCUS Focus;
-  UINTN NavIndex;
-  UINTN ContentIndex;
+  UI_PAGE PageStack[UI_MAX_PAGE_STACK];
+  UINTN PageDepth;
+  UINTN Selection[UI_PAGE_COUNT];
   UINTN Tick;
   BOOLEAN SaveRequested;
+  UI_ACTION Action;
+  ELF_BOOT_STATUS LastBoot;
+  BOOLEAN LastBootValid;
   UINTN ScreenCols;
   UINTN ScreenRows;
 } UI_CONTEXT;
@@ -101,19 +105,6 @@ static const CHAR16* gLogLabels[] = { L"off", L"error", L"info", L"debug" };
 static const CHAR16* gOnOffLabels[] = { L"disabled", L"enabled" };
 static const CHAR16* gPresetLabels[] = { L"balanced", L"stealth", L"analysis" };
 static const CHAR16* gProfileLabels[] = { L"default", L"research", L"secure" };
-
-static const UI_NAV_ITEM gNavItems[] = {
-  { L"dashboard", UI_PAGE_DASHBOARD },
-  { L"hypervisor configuration", UI_PAGE_HV_CONFIG },
-  { L"vm exit controls", UI_PAGE_VMEXIT },
-  { L"memory monitoring", UI_PAGE_MEMORY },
-  { L"hook manager", UI_PAGE_HOOKS },
-  { L"security options", UI_PAGE_SECURITY },
-  { L"debug tools", UI_PAGE_DEBUG },
-  { L"system information", UI_PAGE_SYSTEM },
-  { L"boot options", UI_PAGE_BOOT },
-  { L"logs", UI_PAGE_LOGS }
-};
 
 static VOID UiSetColor(UINTN Attr) {
   gST->ConOut->SetAttribute(gST->ConOut, Attr);
@@ -227,6 +218,17 @@ static VOID UiConfigSave(UI_CONFIG* Ui) {
   BootDbgAdd(L"[ui] config save: %r", Status);
 }
 
+static VOID UiLoadLastBoot(UI_CONTEXT* Ctx) {
+  if (!Ctx) return;
+  ZeroMem(&Ctx->LastBoot, sizeof(Ctx->LastBoot));
+  Ctx->LastBootValid = FALSE;
+  UINTN Size = sizeof(Ctx->LastBoot);
+  EFI_STATUS Status = gRT->GetVariable(L"elf_boot_status", &gElfBootStatusGuid, NULL, &Size, &Ctx->LastBoot);
+  if (!EFI_ERROR(Status) && Size == sizeof(Ctx->LastBoot)) {
+    Ctx->LastBootValid = TRUE;
+  }
+}
+
 static VOID UiDrawHeader(UI_CONTEXT* Ctx) {
   UINTN cols = 0;
   UiQueryScreenSize(&cols, NULL);
@@ -238,7 +240,7 @@ static VOID UiDrawHeader(UI_CONTEXT* Ctx) {
   UiPrintAt(2, 1, L"elf hypervisor loader v1.0");
   UiPrintAt(2, 2, L"developed by the [elf] development team");
   UiPrintAt(2, 3, L"contributors: elf-nigel, elf-icarus");
-  UiPrintAt(2, 4, L"cpu vendor: %s | cpu virtualization: %s", vendor,
+  UiPrintAt(2, 4, L"cpu vendor: %s | virtualization: %s", vendor,
             (Ctx->Handoff->Features.Vmx || Ctx->Handoff->Features.Svm) ? L"enabled" : L"disabled");
   UiPrintAt(2, 5, L"vmx status: %s | svm status: %s", Ctx->Handoff->Features.Vmx ? L"ready" : L"unavailable",
             Ctx->Handoff->Features.Svm ? L"ready" : L"unavailable");
@@ -254,10 +256,9 @@ static VOID UiDrawFooter(UI_CONTEXT* Ctx) {
   UiSetColor(EFI_LIGHTCYAN | EFI_BACKGROUND_BLACK);
   UiRepeatChar(0, row, L'\x2500', cols);
   UiSetColor(EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK);
-  UiPrintAt(2, row + 1, L"f1 help | f2 reload config | f5 refresh | esc back | enter select");
-  if (Ctx->Focus == UI_FOCUS_CONTENT) {
-    UiPrintAt(cols - 30, row + 1, L"left/right toggle");
-  }
+  UiPrintAt(2, row + 1, L"up/down select | left/right change | enter action | esc back");
+  UiPrintAt(cols - 26, row + 1, L"f2 reload | f5 refresh");
+  (void)Ctx;
 }
 
 static BOOLEAN UiShouldLogKey(EFI_INPUT_KEY Key, UINTN Frame) {
@@ -269,130 +270,59 @@ static BOOLEAN UiShouldLogKey(EFI_INPUT_KEY Key, UINTN Frame) {
   return TRUE;
 }
 
-static VOID UiDrawDebugOverlay(UINTN Cols, UINTN Rows) {
-  UINTN width = (Cols > 72) ? 72 : (Cols > 50 ? 50 : (Cols > 30 ? 30 : Cols - 2));
-  UINTN height = 7;
-  if (width < 30) return;
-  if (Rows <= UI_HEADER_HEIGHT + UI_FOOTER_HEIGHT + height + 1) return;
+static VOID UiDrawContentHeader(UINTN Left, UINTN Top, UINTN Width, CONST CHAR16* Title) {
+  UiDrawBox(Left, Top, Width, 3);
+  UiPrintAt(Left + 2, Top + 1, Title);
+}
 
-  UINTN left = Cols - width - 1;
-  UINTN top = Rows - UI_FOOTER_HEIGHT - height - 1;
-  if (top < UI_HEADER_HEIGHT) top = UI_HEADER_HEIGHT;
-
-  UiSetColor(EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK);
-  UiDrawBox(left, top, width, height);
-  UiPrintAt(left + 2, top + 1, L"debug (last 5)");
-
-  UINTN count = BootDbgCount();
-  const BOOT_DBG_LINE* lines = BootDbgGetLines();
-  UINTN row = top + 2;
-  if (!lines || count == 0) {
-    UiPrintAt(left + 2, row++, L"(no events)");
-  } else {
-    for (UINTN i = 0; i < count && i < BOOTDBG_MAX_LINES; i++) {
-      UiPrintAt(left + 2, row++, L"%-*s", (INTN)(width - 4), lines[i].Text);
-    }
+static VOID UiDrawContentBox(UINTN Left, UINTN Top, UINTN Width, UINTN Height, CONST CHAR16* Title) {
+  UiDrawBox(Left, Top, Width, Height);
+  if (Title) {
+    UiPrintAt(Left + 2, Top + 1, Title);
   }
 }
 
-static VOID UiDrawNav(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Height) {
-  if (Height < 6 || Left + UI_NAV_WIDTH >= g_ui_cols) return;
-  UiSetColor(EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK);
-  UiDrawBox(Left, Top, UI_NAV_WIDTH, Height);
-  UiPrintAt(Left + 2, Top + 1, L"navigation");
-
-  for (UINTN i = 0; i < sizeof(gNavItems)/sizeof(gNavItems[0]); ++i) {
-    UINTN row = Top + 3 + i;
-    BOOLEAN active = (i == Ctx->NavIndex);
-    CHAR16 cursor = (Ctx->Tick % 2 == 0) ? L'>' : L'*';
-
-    if (active && Ctx->Focus == UI_FOCUS_NAV) {
-      UiSetColor(EFI_LIGHTGREEN | EFI_BACKGROUND_BLACK);
-      UiPrintAt(Left + 2, row, L"%c %s", cursor, gNavItems[i].Label);
-      UiSetColor(EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK);
-    } else {
-      UiPrintAt(Left + 2, row, L"  %s", gNavItems[i].Label);
-    }
-  }
-}
-
-static VOID UiDrawOption(UI_CONTEXT* Ctx, UI_OPTION* Opt, UINTN Col, UINTN Row, BOOLEAN Active) {
+static VOID UiDrawOption(UI_CONTEXT* Ctx, UI_MENU_ITEM* Item, UINTN Col, UINTN Row, BOOLEAN Active) {
   CHAR16 value[32];
   value[0] = 0;
 
-  if (Opt->Kind == UI_OPT_TOGGLE && Opt->Value) {
-    UnicodeSPrint(value, sizeof(value), L"[%s]", gOnOffLabels[*Opt->Value ? 1 : 0]);
-  } else if (Opt->Kind == UI_OPT_ENUM && Opt->Value && Opt->EnumLabels && *Opt->Value < Opt->EnumCount) {
-    UnicodeSPrint(value, sizeof(value), L"[%s]", Opt->EnumLabels[*Opt->Value]);
-  } else if (Opt->Kind == UI_OPT_NUMBER && Opt->Value) {
-    UnicodeSPrint(value, sizeof(value), L"[%u]", *Opt->Value);
-  } else if (Opt->Kind == UI_OPT_ACTION) {
-    UnicodeSPrint(value, sizeof(value), L"[run]");
-  } else if (Opt->Kind == UI_OPT_READONLY) {
-    UnicodeSPrint(value, sizeof(value), L"[info]");
+  switch (Item->Kind) {
+    case UI_ITEM_TOGGLE:
+      if (Item->Value) {
+        UnicodeSPrint(value, sizeof(value), L"[%s]", gOnOffLabels[*Item->Value ? 1 : 0]);
+      }
+      break;
+    case UI_ITEM_ENUM:
+      if (Item->Value && Item->EnumLabels && *Item->Value < Item->EnumCount) {
+        UnicodeSPrint(value, sizeof(value), L"[%s]", Item->EnumLabels[*Item->Value]);
+      }
+      break;
+    case UI_ITEM_NUMBER:
+      if (Item->Value) {
+        UnicodeSPrint(value, sizeof(value), L"[%u]", *Item->Value);
+      }
+      break;
+    case UI_ITEM_ACTION:
+      UnicodeSPrint(value, sizeof(value), L"[run]");
+      break;
+    case UI_ITEM_SUBPAGE:
+      UnicodeSPrint(value, sizeof(value), L"[open]");
+      break;
+    case UI_ITEM_READONLY:
+      UnicodeSPrint(value, sizeof(value), L"[info]");
+      break;
+    default:
+      break;
   }
 
-  if (Active && Ctx->Focus == UI_FOCUS_CONTENT) {
+  if (Active) {
     UiSetColor(EFI_LIGHTGREEN | EFI_BACKGROUND_BLACK);
   }
-  UiPrintAt(Col, Row, L"%-28s %s", Opt->Label, value);
-  if (Active && Ctx->Focus == UI_FOCUS_CONTENT) {
+  UiPrintAt(Col, Row, L"%-30s %s", Item->Label, value);
+  if (Active) {
     UiSetColor(EFI_LIGHTGRAY | EFI_BACKGROUND_BLACK);
   }
-}
-
-static VOID UiGetPageOptions(UI_CONTEXT* Ctx, UI_PAGE Page, UI_OPTION* Out, UINTN* OutCount) {
-  *OutCount = 0;
-  if (Page == UI_PAGE_HV_CONFIG) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"hypervisor enabled", UI_OPT_TOGGLE, &Ctx->Config->EnableHv, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"hv mode", UI_OPT_ENUM, &Ctx->Config->HvMode, 0, 2, 1, gModeLabels, 3, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"enable vmx", UI_OPT_TOGGLE, &Ctx->Config->EnableVmx, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"enable svm", UI_OPT_TOGGLE, &Ctx->Config->EnableSvm, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"enable vpid", UI_OPT_TOGGLE, &Ctx->Config->EnableVpid, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"stealth mode", UI_OPT_TOGGLE, &Ctx->Config->EnableStealth, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"self protect", UI_OPT_TOGGLE, &Ctx->Config->EnableSelfProtect, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"anti tamper", UI_OPT_TOGGLE, &Ctx->Config->EnableAntiTamper, 0, 1, 1, NULL, 0, NULL };
-  } else if (Page == UI_PAGE_VMEXIT) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"cpuid interception", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableCpuidIntercept, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"msr interception", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableMsrIntercept, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"control register monitor", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableCrMonitor, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"debug register monitor", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableDrMonitor, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"io port interception", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableIoMonitor, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"vmexit logging", UI_OPT_TOGGLE, &Ctx->Config->VmexitLogging, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"vmexit sample rate", UI_OPT_NUMBER, &Ctx->Config->VmexitSampleRate, 0, 10, 1, NULL, 0, NULL };
-  } else if (Page == UI_PAGE_MEMORY) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"memory monitoring", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableMemMonitor, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"ept hook engine", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableEptHooks, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"page access tracing", UI_OPT_TOGGLE, &Ctx->UiConfig.EnablePageTrace, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"execute-only pages", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableExecOnly, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"memory integrity checks", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableIntegrityChecks, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"mem integrity (boot)", UI_OPT_TOGGLE, &Ctx->Config->EnableMemIntegrity, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"guard pages", UI_OPT_TOGGLE, &Ctx->Config->EnableGuardPages, 0, 1, 1, NULL, 0, NULL };
-  } else if (Page == UI_PAGE_HOOKS) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"hooks master", UI_OPT_TOGGLE, &Ctx->Config->EnableHooks, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"hook syscall", UI_OPT_TOGGLE, &Ctx->Config->HookSyscall, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"hook msr", UI_OPT_TOGGLE, &Ctx->Config->HookMsr, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"hook cpuid", UI_OPT_TOGGLE, &Ctx->Config->HookCpuid, 0, 1, 1, NULL, 0, NULL };
-  } else if (Page == UI_PAGE_SECURITY) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"self protect", UI_OPT_TOGGLE, &Ctx->Config->EnableSelfProtect, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"anti tamper", UI_OPT_TOGGLE, &Ctx->Config->EnableAntiTamper, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"stealth mode", UI_OPT_TOGGLE, &Ctx->Config->EnableStealth, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"integrity checks", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableIntegrityChecks, 0, 1, 1, NULL, 0, NULL };
-  } else if (Page == UI_PAGE_DEBUG) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"verbose", UI_OPT_TOGGLE, &Ctx->Config->Verbose, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"serial debug", UI_OPT_TOGGLE, &Ctx->Config->SerialDebug, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"log level", UI_OPT_ENUM, &Ctx->Config->LogLevel, 0, 3, 1, gLogLabels, 4, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"boot diagnostics", UI_OPT_TOGGLE, &Ctx->UiConfig.BootDiagnostics, 0, 1, 1, NULL, 0, NULL };
-  } else if (Page == UI_PAGE_BOOT) {
-    Out[(*OutCount)++] = (UI_OPTION){ L"preset", UI_OPT_ENUM, &Ctx->UiConfig.PresetId, 0, 2, 1, gPresetLabels, 3, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"profile", UI_OPT_ENUM, &Ctx->UiConfig.ProfileId, 0, 2, 1, gProfileLabels, 3, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"integrity checks before launch", UI_OPT_TOGGLE, &Ctx->UiConfig.EnableIntegrityChecks, 0, 1, 1, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"start operating system", UI_OPT_ACTION, NULL, 0, 0, 0, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"start os without hypervisor", UI_OPT_ACTION, NULL, 0, 0, 0, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"reload configuration", UI_OPT_ACTION, NULL, 0, 0, 0, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"reset hv state", UI_OPT_ACTION, NULL, 0, 0, 0, NULL, 0, NULL };
-    Out[(*OutCount)++] = (UI_OPTION){ L"shutdown system", UI_OPT_ACTION, NULL, 0, 0, 0, NULL, 0, NULL };
-  }
+  (void)Ctx;
 }
 
 static VOID UiApplyPreset(UI_CONTEXT* Ctx) {
@@ -436,188 +366,226 @@ static VOID UiApplyToBootConfig(UI_CONTEXT* Ctx) {
   }
 }
 
-static VOID UiDrawContentHeader(UINTN Left, UINTN Top, UINTN Width, CONST CHAR16* Title) {
-  UiDrawBox(Left, Top, Width, 3);
-  UiPrintAt(Left + 2, Top + 1, Title);
-}
-
-static VOID UiDrawContentBox(UINTN Left, UINTN Top, UINTN Width, UINTN Height, CONST CHAR16* Title) {
-  UiDrawBox(Left, Top, Width, Height);
-  if (Title) {
-    UiPrintAt(Left + 2, Top + 1, Title);
-  }
-}
-
-static VOID UiRenderDashboard(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
-  UiDrawContentHeader(Left, Top, Width, L"system overview");
-
-  UINTN row = Top + 3;
-  UiPrintAt(Left + 2, row++, L"hypervisor status: %s", Ctx->Config->EnableHv ? L"active" : L"disabled");
-  UiPrintAt(Left + 2, row++, L"vmx root mode: %s", Ctx->Handoff->Features.Vmx ? L"enabled" : L"unavailable");
-  UiPrintAt(Left + 2, row++, L"ept support: %s", Ctx->Handoff->Features.Ept ? L"available" : L"unavailable");
-  UiPrintAt(Left + 2, row++, L"nested paging: %s", Ctx->Handoff->Features.Npt ? L"enabled" : L"disabled");
-
-  row++;
-  UiPrintAt(Left + 2, row++, L"active features:");
-  UiPrintAt(Left + 4, row++, Ctx->Config->HookCpuid ? L"cpuid interception" : L"cpuid interception (off)");
-  UiPrintAt(Left + 4, row++, Ctx->Config->HookMsr ? L"msr monitoring" : L"msr monitoring (off)");
-  UiPrintAt(Left + 4, row++, Ctx->Config->EnableHooks ? L"hook engine" : L"hook engine (off)");
-  UiPrintAt(Left + 4, row++, Ctx->Config->EnableMemIntegrity ? L"memory integrity" : L"memory integrity (off)");
-  UiPrintAt(Left + 4, row++, Ctx->Config->EnableGuardPages ? L"guard pages" : L"guard pages (off)");
-
-  row++;
-  UiPrintAt(Left + 2, row++, L"vm exit counters");
-  UiPrintAt(Left + 4, row++, L"cpuid exits: 124");
-  UiPrintAt(Left + 4, row++, L"msr exits: 19");
-  UiPrintAt(Left + 4, row++, L"control register exits: 6");
-  UiPrintAt(Left + 4, row++, L"ept violations: 0");
-}
-
-static VOID UiRenderSystemInfo(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
-  UiDrawContentHeader(Left, Top, Width, L"system information");
-  CHAR16 vendor[16];
-  AsciiToLowerUtf16(Ctx->Handoff->Vendor, vendor, 16);
-  UINTN row = Top + 3;
-  UiPrintAt(Left + 2, row++, L"cpu vendor: %s", vendor);
-  UiPrintAt(Left + 2, row++, L"virtualization: %s", (Ctx->Handoff->Features.Vmx || Ctx->Handoff->Features.Svm) ? L"supported" : L"unavailable");
-  UiPrintAt(Left + 2, row++, L"ept support: %s", Ctx->Handoff->Features.Ept ? L"yes" : L"no");
-  UiPrintAt(Left + 2, row++, L"unrestricted guest: %s", Ctx->Handoff->Features.Vmx ? L"yes" : L"no");
-  UiPrintAt(Left + 2, row++, L"vmcs shadowing: %s", Ctx->Handoff->Features.Vmx ? L"yes" : L"no");
-  row++;
-  UiPrintAt(Left + 2, row++, L"compatibility check: %s",
-            (Ctx->Handoff->Features.Vmx || Ctx->Handoff->Features.Svm) ? L"pass" : L"fail");
-  UiPrintAt(Left + 2, row++, L"memory detected: 32768 mb");
-  UiPrintAt(Left + 2, row++, L"boot mode: uefi");
-  UiPrintAt(Left + 2, row++, L"secure boot: disabled");
-}
-
-static VOID UiRenderLogs(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
-  UiDrawContentHeader(Left, Top, Width, L"hypervisor logs");
-  UINTN row = Top + 3;
-  UINTN max_rows = (Height > 4) ? (Height - 4) : 0;
+static VOID UiDrawLogPanel(UINTN Left, UINTN Top, UINTN Width, UINTN Height, CONST CHAR16* Title) {
+  UiDrawContentBox(Left, Top, Width, Height, Title);
+  UINTN row = Top + 2;
+  UINTN max_rows = (Height > 3) ? (Height - 3) : 0;
   UINTN count = BootLogCount();
   const BOOT_LOG_LINE* lines = BootLogGetLines();
   if (!lines || count == 0 || max_rows == 0) {
-    UiPrintAt(Left + 2, row++, L"[log] no entries yet");
+    UiPrintAt(Left + 2, row++, L"(no log entries)");
     return;
   }
   UINTN to_show = (count < max_rows) ? count : max_rows;
+  UINTN start = (count > to_show) ? (count - to_show) : 0;
   for (UINTN i = 0; i < to_show; ++i) {
-    UiPrintAt(Left + 2, row++, L"%s", lines[i].Text);
+    UiPrintAt(Left + 2, row++, L"%s", lines[start + i].Text);
   }
 }
 
-static VOID UiRenderContent(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
-  if (Width < 30 || Height < 8) return;
-  UI_OPTION options[UI_MAX_CONTENT_ITEMS];
-  UINTN count = 0;
+static VOID UiRenderStatus(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
+  UiDrawContentHeader(Left, Top, Width, L"status / diagnostics");
+  UINTN row = Top + 3;
+  CHAR16 vendor[16];
+  AsciiToLowerUtf16(Ctx->Handoff->Vendor, vendor, 16);
 
-  if (Ctx->ActivePage == UI_PAGE_DASHBOARD) {
-    UiRenderDashboard(Ctx, Left, Top, Width, Height);
-    return;
-  }
-  if (Ctx->ActivePage == UI_PAGE_SYSTEM) {
-    UiRenderSystemInfo(Ctx, Left, Top, Width, Height);
-    return;
-  }
-  if (Ctx->ActivePage == UI_PAGE_LOGS) {
-    UiRenderLogs(Ctx, Left, Top, Width, Height);
-    return;
+  UiPrintAt(Left + 2, row++, L"platform");
+  UiPrintAt(Left + 4, row++, L"cpu vendor: %s", vendor);
+  UiPrintAt(Left + 4, row++, L"virtualization: %s", (Ctx->Handoff->Features.Vmx || Ctx->Handoff->Features.Svm) ? L"supported" : L"unavailable");
+  UiPrintAt(Left + 4, row++, L"ept support: %s", Ctx->Handoff->Features.Ept ? L"yes" : L"no");
+  UiPrintAt(Left + 4, row++, L"npt support: %s", Ctx->Handoff->Features.Npt ? L"yes" : L"no");
+
+  row++;
+  UiPrintAt(Left + 2, row++, L"current config");
+  UiPrintAt(Left + 4, row++, L"hypervisor: %s", Ctx->Config->EnableHv ? L"enabled" : L"disabled");
+  UiPrintAt(Left + 4, row++, L"vmx: %s | svm: %s", Ctx->Config->EnableVmx ? L"on" : L"off", Ctx->Config->EnableSvm ? L"on" : L"off");
+  UiPrintAt(Left + 4, row++, L"ept: %s | npt: %s | vpid: %s",
+            Ctx->Config->EnableEpt ? L"on" : L"off",
+            Ctx->Config->EnableNpt ? L"on" : L"off",
+            Ctx->Config->EnableVpid ? L"on" : L"off");
+  UiPrintAt(Left + 4, row++, L"hooks: %s | mem integrity: %s", Ctx->Config->EnableHooks ? L"on" : L"off",
+            Ctx->Config->EnableMemIntegrity ? L"on" : L"off");
+
+  row++;
+  UiPrintAt(Left + 2, row++, L"last boot status");
+  if (Ctx->LastBootValid) {
+    UiPrintAt(Left + 4, row++, L"hv enabled: %s", Ctx->LastBoot.HvEnabled ? L"yes" : L"no");
+    UiPrintAt(Left + 4, row++, L"hv initialized: %s", Ctx->LastBoot.HvInitialized ? L"yes" : L"no");
+    UiPrintAt(Left + 4, row++, L"virt supported: %s", Ctx->LastBoot.VirtualizationSupported ? L"yes" : L"no");
+    UiPrintAt(Left + 4, row++, L"ept supported: %s", Ctx->LastBoot.EptSupported ? L"yes" : L"no");
+    UiPrintAt(Left + 4, row++, L"config loaded: %s", Ctx->LastBoot.ConfigLoaded ? L"yes" : L"no");
+    UiPrintAt(Left + 4, row++, L"hv version: %u", (UINT32)Ctx->LastBoot.HvVersion);
+    UiPrintAt(Left + 4, row++, L"boot timestamp: %lu", (UINT64)Ctx->LastBoot.BootTimestamp);
+  } else {
+    UiPrintAt(Left + 4, row++, L"no previous boot status found");
   }
 
-  UiGetPageOptions(Ctx, Ctx->ActivePage, options, &count);
-  UiDrawContentHeader(Left, Top, Width, L"configuration");
+  if (Height > 20) {
+    UINTN log_top = Top + (Height > 10 ? (Height - 10) : (Top + row));
+    if (log_top < row + 1) log_top = row + 1;
+    UiDrawLogPanel(Left, log_top, Width, Height - (log_top - Top), L"boot log (latest)");
+  }
+}
+
+static VOID UiRenderLogs(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
+  UiDrawContentHeader(Left, Top, Width, L"boot log");
+  UiDrawLogPanel(Left, Top + 3, Width, Height - 3, NULL);
+  (void)Ctx;
+}
+
+static VOID UiRenderPage(UI_CONTEXT* Ctx, UI_MENU_PAGE* Page, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
+  UiDrawContentHeader(Left, Top, Width, Page->Title);
   UiDrawContentBox(Left, Top + 3, Width, Height - 3, NULL);
 
   UINTN row = Top + 5;
-  for (UINTN i = 0; i < count && i < Height - 6; ++i) {
-    UiDrawOption(Ctx, &options[i], Left + 2, row++, i == Ctx->ContentIndex);
-  }
-
-  if (Ctx->ActivePage == UI_PAGE_DEBUG) {
-    row++;
-    UiPrintAt(Left + 2, row++, L"diagnostics: view vm exit counters / hv log buffer");
-    UiPrintAt(Left + 2, row++, L"startup metrics: %u ms", (UINTN)Ctx->Config->BootDelayStep * 10);
-  }
-  if (Ctx->ActivePage == UI_PAGE_BOOT) {
-    row++;
-    UiPrintAt(Left + 2, row++, L"boot diagnostics: %s", Ctx->UiConfig.BootDiagnostics ? L"enabled" : L"disabled");
-    UiPrintAt(Left + 2, row++, L"hardware compatibility: %s",
-              (Ctx->Handoff->Features.Vmx || Ctx->Handoff->Features.Svm) ? L"compatible" : L"limited");
+  for (UINTN i = 0; i < Page->Count && i < Height - 6; ++i) {
+    UiDrawOption(Ctx, &Page->Items[i], Left + 2, row++, i == Ctx->Selection[Ctx->PageStack[Ctx->PageDepth - 1]]);
   }
 }
 
-static EFI_STATUS UiHandleContentInput(UI_CONTEXT* Ctx, UI_OPTION* Options, UINTN Count, EFI_INPUT_KEY Key) {
-  if (Count == 0) return EFI_SUCCESS;
+static VOID UiBuildPages(UI_CONTEXT* Ctx, UI_MENU_PAGE* Pages) {
+  static UI_MENU_ITEM main_items[12];
+  static UI_MENU_ITEM feature_items[16];
+  static UI_MENU_ITEM hv_items[16];
+
+  UINTN m = 0;
+  main_items[m++] = (UI_MENU_ITEM){ L"feature toggles", UI_ITEM_SUBPAGE, NULL, 0, 0, 0, NULL, 0, UI_PAGE_FEATURES, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"hypervisor configuration", UI_ITEM_SUBPAGE, NULL, 0, 0, 0, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"status / diagnostics", UI_ITEM_SUBPAGE, NULL, 0, 0, 0, NULL, 0, UI_PAGE_STATUS, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"boot log", UI_ITEM_SUBPAGE, NULL, 0, 0, 0, NULL, 0, UI_PAGE_LOGS, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"start windows", UI_ITEM_ACTION, NULL, 0, 0, 0, NULL, 0, UI_PAGE_MAIN, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"start windows without hypervisor", UI_ITEM_ACTION, NULL, 0, 0, 0, NULL, 0, UI_PAGE_MAIN, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"reload config", UI_ITEM_ACTION, NULL, 0, 0, 0, NULL, 0, UI_PAGE_MAIN, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"reset hv state", UI_ITEM_ACTION, NULL, 0, 0, 0, NULL, 0, UI_PAGE_MAIN, NULL };
+  main_items[m++] = (UI_MENU_ITEM){ L"shutdown system", UI_ITEM_ACTION, NULL, 0, 0, 0, NULL, 0, UI_PAGE_MAIN, NULL };
+
+  UINTN f = 0;
+  feature_items[f++] = (UI_MENU_ITEM){ L"cpuid interception", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableCpuidIntercept, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"msr interception", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableMsrIntercept, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"control register monitor", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableCrMonitor, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"debug register monitor", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableDrMonitor, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"io port interception", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableIoMonitor, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"memory monitoring", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableMemMonitor, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"ept hook engine", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableEptHooks, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"page access tracing", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnablePageTrace, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"execute-only pages", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableExecOnly, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+  feature_items[f++] = (UI_MENU_ITEM){ L"integrity checks", UI_ITEM_TOGGLE, &Ctx->UiConfig.EnableIntegrityChecks, 0, 1, 1, NULL, 0, UI_PAGE_FEATURES, NULL };
+
+  UINTN h = 0;
+  hv_items[h++] = (UI_MENU_ITEM){ L"hypervisor enabled", UI_ITEM_TOGGLE, &Ctx->Config->EnableHv, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"hv mode", UI_ITEM_ENUM, &Ctx->Config->HvMode, 0, 2, 1, gModeLabels, 3, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"enable vmx", UI_ITEM_TOGGLE, &Ctx->Config->EnableVmx, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"enable svm", UI_ITEM_TOGGLE, &Ctx->Config->EnableSvm, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"enable ept", UI_ITEM_TOGGLE, &Ctx->Config->EnableEpt, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"enable npt", UI_ITEM_TOGGLE, &Ctx->Config->EnableNpt, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"enable vpid", UI_ITEM_TOGGLE, &Ctx->Config->EnableVpid, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"stealth mode", UI_ITEM_TOGGLE, &Ctx->Config->EnableStealth, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"self protect", UI_ITEM_TOGGLE, &Ctx->Config->EnableSelfProtect, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"anti tamper", UI_ITEM_TOGGLE, &Ctx->Config->EnableAntiTamper, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"verbose", UI_ITEM_TOGGLE, &Ctx->Config->Verbose, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"serial debug", UI_ITEM_TOGGLE, &Ctx->Config->SerialDebug, 0, 1, 1, NULL, 0, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"log level", UI_ITEM_ENUM, &Ctx->Config->LogLevel, 0, 3, 1, gLogLabels, 4, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"preset", UI_ITEM_ENUM, &Ctx->UiConfig.PresetId, 0, 2, 1, gPresetLabels, 3, UI_PAGE_HV_CONFIG, NULL };
+  hv_items[h++] = (UI_MENU_ITEM){ L"profile", UI_ITEM_ENUM, &Ctx->UiConfig.ProfileId, 0, 2, 1, gProfileLabels, 3, UI_PAGE_HV_CONFIG, NULL };
+
+  Pages[UI_PAGE_MAIN] = (UI_MENU_PAGE){ L"main menu", main_items, m };
+  Pages[UI_PAGE_FEATURES] = (UI_MENU_PAGE){ L"feature toggles", feature_items, f };
+  Pages[UI_PAGE_HV_CONFIG] = (UI_MENU_PAGE){ L"hypervisor configuration", hv_items, h };
+  Pages[UI_PAGE_STATUS] = (UI_MENU_PAGE){ L"status / diagnostics", NULL, 0 };
+  Pages[UI_PAGE_LOGS] = (UI_MENU_PAGE){ L"boot log", NULL, 0 };
+}
+
+static EFI_STATUS UiHandleAction(UI_CONTEXT* Ctx, UINTN Index) {
+  if (!Ctx) return EFI_INVALID_PARAMETER;
+  switch (Index) {
+    case 4:
+      Ctx->Action = UI_ACTION_BOOT;
+      Ctx->SaveRequested = TRUE;
+      UiApplyPreset(Ctx);
+      BootDbgAdd(L"[ui] action: start os");
+      return EFI_SUCCESS;
+    case 5:
+      Ctx->Config->EnableHv = 0;
+      Ctx->Action = UI_ACTION_BOOT_NO_HV;
+      Ctx->SaveRequested = TRUE;
+      BootDbgAdd(L"[ui] action: start os (no hv)");
+      return EFI_SUCCESS;
+    case 6:
+      LoadConfig(Ctx->Config);
+      LoadConfigFile(Ctx->ImageHandle, Ctx->Config);
+      UiConfigLoad(&Ctx->UiConfig);
+      BootDbgAdd(L"[ui] action: reload config");
+      return EFI_SUCCESS;
+    case 7:
+      BootDbgAdd(L"[ui] action: reset hv state");
+      return EFI_SUCCESS;
+    case 8:
+      BootDbgAdd(L"[ui] action: shutdown");
+      gRT->ResetSystem(EfiResetShutdown, EFI_SUCCESS, 0, NULL);
+      return EFI_SUCCESS;
+    default:
+      return EFI_SUCCESS;
+  }
+}
+
+static EFI_STATUS UiHandleMenuInput(UI_CONTEXT* Ctx, UI_MENU_PAGE* Page, EFI_INPUT_KEY Key) {
+  if (!Ctx || !Page || Page->Count == 0) return EFI_SUCCESS;
+  UINTN page = Ctx->PageStack[Ctx->PageDepth - 1];
+  UINTN sel = Ctx->Selection[page];
+
   if (Key.ScanCode == SCAN_UP) {
-    if (Ctx->ContentIndex == 0) Ctx->ContentIndex = Count - 1;
-    else Ctx->ContentIndex--;
-    BootDbgAdd(L"[ui] content up: %u", (UINT32)Ctx->ContentIndex);
+    sel = (sel == 0) ? (Page->Count - 1) : (sel - 1);
+    Ctx->Selection[page] = sel;
+    BootDbgAdd(L"[ui] nav up: %u", (UINT32)sel);
     return EFI_SUCCESS;
   }
   if (Key.ScanCode == SCAN_DOWN) {
-    Ctx->ContentIndex = (Ctx->ContentIndex + 1) % Count;
-    BootDbgAdd(L"[ui] content down: %u", (UINT32)Ctx->ContentIndex);
+    sel = (sel + 1) % Page->Count;
+    Ctx->Selection[page] = sel;
+    BootDbgAdd(L"[ui] nav down: %u", (UINT32)sel);
     return EFI_SUCCESS;
   }
 
-  UI_OPTION* Opt = &Options[Ctx->ContentIndex];
+  UI_MENU_ITEM* Item = &Page->Items[sel];
   if (Key.ScanCode == SCAN_LEFT || Key.ScanCode == SCAN_RIGHT || Key.UnicodeChar == CHAR_CARRIAGE_RETURN) {
-    switch (Opt->Kind) {
-      case UI_OPT_TOGGLE:
-        if (Opt->Value) {
-          *Opt->Value = (*Opt->Value == 0) ? 1 : 0;
-          BootDbgAdd(L"[ui] toggle: %s=%u", Opt->Label, (UINT32)*Opt->Value);
+    switch (Item->Kind) {
+      case UI_ITEM_TOGGLE:
+        if (Item->Value) {
+          *Item->Value = (*Item->Value == 0) ? 1 : 0;
+          BootDbgAdd(L"[ui] toggle: %s=%u", Item->Label, (UINT32)*Item->Value);
         }
         break;
-      case UI_OPT_ENUM:
-        if (Opt->Value && Opt->EnumCount > 0) {
-          UINT8 v = *Opt->Value;
-          if (Key.ScanCode == SCAN_LEFT) v = (v == 0) ? (UINT8)(Opt->EnumCount - 1) : (UINT8)(v - 1);
-          else v = (UINT8)((v + 1) % Opt->EnumCount);
-          *Opt->Value = v;
-          BootDbgAdd(L"[ui] enum: %s=%u", Opt->Label, (UINT32)*Opt->Value);
+      case UI_ITEM_ENUM:
+        if (Item->Value && Item->EnumCount > 0) {
+          UINT8 v = *Item->Value;
+          if (Key.ScanCode == SCAN_LEFT) v = (v == 0) ? (UINT8)(Item->EnumCount - 1) : (UINT8)(v - 1);
+          else v = (UINT8)((v + 1) % Item->EnumCount);
+          *Item->Value = v;
+          BootDbgAdd(L"[ui] enum: %s=%u", Item->Label, (UINT32)*Item->Value);
         }
         break;
-      case UI_OPT_NUMBER:
-        if (Opt->Value) {
-          UINT8 v = *Opt->Value;
-          UINT8 step = (Opt->Step == 0) ? 1 : Opt->Step;
-          if (Key.ScanCode == SCAN_LEFT) v = (v <= Opt->Min) ? Opt->Min : (UINT8)(v - step);
-          else v = (v >= Opt->Max) ? Opt->Max : (UINT8)(v + step);
-          *Opt->Value = v;
-          BootDbgAdd(L"[ui] number: %s=%u", Opt->Label, (UINT32)*Opt->Value);
+      case UI_ITEM_NUMBER:
+        if (Item->Value) {
+          UINT8 v = *Item->Value;
+          UINT8 step = (Item->Step == 0) ? 1 : Item->Step;
+          if (Key.ScanCode == SCAN_LEFT) v = (v <= Item->Min) ? Item->Min : (UINT8)(v - step);
+          else v = (v >= Item->Max) ? Item->Max : (UINT8)(v + step);
+          *Item->Value = v;
+          BootDbgAdd(L"[ui] number: %s=%u", Item->Label, (UINT32)*Item->Value);
         }
         break;
-      case UI_OPT_ACTION:
-        if (Ctx->ActivePage == UI_PAGE_BOOT) {
-          if (Ctx->ContentIndex == 3) {
-            Ctx->SaveRequested = TRUE;
-            UiApplyPreset(Ctx);
-            BootDbgAdd(L"[ui] action: start os");
-            return EFI_SUCCESS;
+      case UI_ITEM_SUBPAGE:
+        if (Key.UnicodeChar == CHAR_CARRIAGE_RETURN) {
+          if (Ctx->PageDepth < UI_MAX_PAGE_STACK) {
+            Ctx->PageStack[Ctx->PageDepth++] = Item->SubPage;
+            BootDbgAdd(L"[ui] open page: %u", (UINT32)Item->SubPage);
           }
-          if (Ctx->ContentIndex == 4) {
-            Ctx->Config->EnableHv = 0;
-            Ctx->SaveRequested = TRUE;
-            BootDbgAdd(L"[ui] action: start os (no hv)");
-            return EFI_SUCCESS;
-          }
-          if (Ctx->ContentIndex == 5) {
-            LoadConfig(Ctx->Config);
-            LoadConfigFile(Ctx->ImageHandle, Ctx->Config);
-            UiConfigLoad(&Ctx->UiConfig);
-            BootDbgAdd(L"[ui] action: reload config");
-            return EFI_SUCCESS;
-          }
-          if (Ctx->ContentIndex == 6) {
-            BootDbgAdd(L"[ui] action: reset hv state");
-            return EFI_SUCCESS;
-          }
-          if (Ctx->ContentIndex == 7) {
-            BootDbgAdd(L"[ui] action: shutdown");
-            gRT->ResetSystem(EfiResetShutdown, EFI_SUCCESS, 0, NULL);
-            return EFI_SUCCESS;
+        }
+        break;
+      case UI_ITEM_ACTION:
+        if (Key.UnicodeChar == CHAR_CARRIAGE_RETURN) {
+          if (Ctx->PageStack[Ctx->PageDepth - 1] == UI_PAGE_MAIN) {
+            UiHandleAction(Ctx, sel);
           }
         }
         break;
@@ -659,15 +627,24 @@ static EFI_STATUS RunModernUi(UI_CONTEXT* Ctx) {
       g_ui_rows = rows;
       Ctx->ScreenCols = cols;
       Ctx->ScreenRows = rows;
+
       UINTN bodyTop = UI_HEADER_HEIGHT;
       UINTN bodyHeight = rows - UI_HEADER_HEIGHT - UI_FOOTER_HEIGHT;
-      UINTN contentLeft = UI_NAV_WIDTH + 2;
-      UINTN contentWidth = (cols > contentLeft + 2) ? (cols - contentLeft - 2) : 30;
+      UINTN contentLeft = 2;
+      UINTN contentWidth = (cols > 4) ? (cols - 4) : cols;
 
-      UiDrawNav(Ctx, 1, bodyTop, bodyHeight);
-      UiRenderContent(Ctx, contentLeft, bodyTop, contentWidth, bodyHeight);
+      UI_MENU_PAGE pages[UI_PAGE_COUNT];
+      UiBuildPages(Ctx, pages);
+      UI_PAGE current = Ctx->PageStack[Ctx->PageDepth - 1];
+      if (current == UI_PAGE_STATUS) {
+        UiRenderStatus(Ctx, contentLeft, bodyTop, contentWidth, bodyHeight);
+      } else if (current == UI_PAGE_LOGS) {
+        UiRenderLogs(Ctx, contentLeft, bodyTop, contentWidth, bodyHeight);
+      } else {
+        UiRenderPage(Ctx, &pages[current], contentLeft, bodyTop, contentWidth, bodyHeight);
+      }
+
       UiDrawFooter(Ctx);
-      UiDrawDebugOverlay(cols, rows);
       Redraw = FALSE;
       frame++;
     }
@@ -690,9 +667,9 @@ static EFI_STATUS RunModernUi(UI_CONTEXT* Ctx) {
     }
 
     if (Key.ScanCode == SCAN_ESC || Key.UnicodeChar == CHAR_BACKSPACE) {
-      if (Ctx->Focus == UI_FOCUS_CONTENT) {
-        Ctx->Focus = UI_FOCUS_NAV;
-        BootDbgAdd(L"[ui] focus nav");
+      if (Ctx->PageDepth > 1) {
+        Ctx->PageDepth--;
+        BootDbgAdd(L"[ui] page back");
         Redraw = TRUE;
         continue;
       }
@@ -701,11 +678,6 @@ static EFI_STATUS RunModernUi(UI_CONTEXT* Ctx) {
       return EFI_ABORTED;
     }
 
-    if (Key.ScanCode == SCAN_F1) {
-      BootDbgAdd(L"[ui] help");
-      Redraw = TRUE;
-      continue;
-    }
     if (Key.ScanCode == SCAN_F2) {
       LoadConfig(Ctx->Config);
       LoadConfigFile(Ctx->ImageHandle, Ctx->Config);
@@ -720,46 +692,22 @@ static EFI_STATUS RunModernUi(UI_CONTEXT* Ctx) {
       continue;
     }
 
-    if (Ctx->Focus == UI_FOCUS_NAV) {
-      if (Key.ScanCode == SCAN_UP) {
-        if (Ctx->NavIndex == 0) Ctx->NavIndex = (sizeof(gNavItems)/sizeof(gNavItems[0])) - 1;
-        else Ctx->NavIndex--;
-        BootDbgAdd(L"[ui] nav up: %u", (UINT32)Ctx->NavIndex);
-        Redraw = TRUE;
-        continue;
-      }
-      if (Key.ScanCode == SCAN_DOWN) {
-        Ctx->NavIndex = (Ctx->NavIndex + 1) % (sizeof(gNavItems)/sizeof(gNavItems[0]));
-        BootDbgAdd(L"[ui] nav down: %u", (UINT32)Ctx->NavIndex);
-        Redraw = TRUE;
-        continue;
-      }
-      if (Key.UnicodeChar == CHAR_CARRIAGE_RETURN) {
-        Ctx->ActivePage = gNavItems[Ctx->NavIndex].Page;
-        Ctx->Focus = UI_FOCUS_CONTENT;
-        Ctx->ContentIndex = 0;
-        BootDbgAdd(L"[ui] nav select: %u", (UINT32)Ctx->ActivePage);
-        Redraw = TRUE;
-        continue;
-      }
-    } else {
-      UI_OPTION options[UI_MAX_CONTENT_ITEMS];
-      UINTN count = 0;
-      UiGetPageOptions(Ctx, Ctx->ActivePage, options, &count);
-      UiHandleContentInput(Ctx, options, count, Key);
-      if (Ctx->SaveRequested) {
-        UiApplyToBootConfig(Ctx);
-        UiConfigSave(&Ctx->UiConfig);
-        gBS->CloseEvent(Events[1]);
-        BootDbgAdd(L"[ui] boot selected");
-        return EFI_SUCCESS;
-      }
-      if (Key.UnicodeChar == CHAR_CARRIAGE_RETURN && Ctx->ActivePage != UI_PAGE_BOOT) {
-        Ctx->Focus = UI_FOCUS_NAV;
-        BootDbgAdd(L"[ui] focus nav");
-      }
-      Redraw = TRUE;
+    UI_MENU_PAGE pages[UI_PAGE_COUNT];
+    UiBuildPages(Ctx, pages);
+    UI_PAGE current = Ctx->PageStack[Ctx->PageDepth - 1];
+    if (current != UI_PAGE_STATUS && current != UI_PAGE_LOGS) {
+      UiHandleMenuInput(Ctx, &pages[current], Key);
     }
+
+    if (Ctx->SaveRequested) {
+      UiApplyToBootConfig(Ctx);
+      UiConfigSave(&Ctx->UiConfig);
+      gBS->CloseEvent(Events[1]);
+      BootDbgAdd(L"[ui] boot selected");
+      return EFI_SUCCESS;
+    }
+
+    Redraw = TRUE;
   }
 }
 
@@ -771,13 +719,13 @@ EFI_STATUS RunConfigMenu(EFI_HANDLE ImageHandle, THV_HANDOFF* Handoff) {
   Ctx.ImageHandle = ImageHandle;
   Ctx.Handoff = Handoff;
   Ctx.Config = &Handoff->Config;
-  Ctx.ActivePage = UI_PAGE_DASHBOARD;
-  Ctx.Focus = UI_FOCUS_NAV;
-  Ctx.NavIndex = 0;
-  Ctx.ContentIndex = 0;
+  Ctx.PageDepth = 1;
+  Ctx.PageStack[0] = UI_PAGE_MAIN;
   Ctx.Tick = 0;
   Ctx.SaveRequested = FALSE;
+  Ctx.Action = UI_ACTION_NONE;
 
   UiConfigLoad(&Ctx.UiConfig);
+  UiLoadLastBoot(&Ctx);
   return RunModernUi(&Ctx);
 }

@@ -63,6 +63,7 @@ typedef struct ELF_BOOT_STATUS {
 #define THV_HANDOFF_VERSION   0x0001
 
 extern EFI_GUID gThvHandoffGuid;
+extern EFI_GUID gElfBootStatusGuid;
 
 VOID GetCpuVendor(CHAR8* Out);
 VOID GetHvFeatures(THV_FEATURES* Out);
