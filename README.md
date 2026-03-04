@@ -72,7 +72,7 @@ See `docs/README.md` for full documentation.
 - [x] add vm-exit stats per-reason export API.
 - [x] add secure boot chain measurement (TPM event log).
 - [x] add config UI in EFI (simple key-toggle menu).
-- add handoff-to-kernel apply policy (feature gating and logging).
+- [x] add handoff-to-kernel apply policy (feature gating and logging).
 - add EFI config variable sanity checker and recovery defaults.
 - add minimal ACPI table handoff (metadata only).
 - add per-cpu watchdog for launch failures.
