@@ -1,4 +1,4 @@
-## EFI IS BROKEN AT THE MOMENT EVEN THOUGH IT BUILDS - CHAINLOAD FAILS
+set-executionpolicy -scope process -executionpolicy bypass .\elfhv_all_in_one.ps1 -efipath C:\Users\admin\Downloads\elfhv.efi
 
 # elf hypervisor
 
