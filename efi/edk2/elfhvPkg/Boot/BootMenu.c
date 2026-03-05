@@ -7,6 +7,8 @@
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/PrintLib.h>
+#include <Library/DevicePathLib.h>
+#include <Protocol/LoadedImage.h>
 #include "Boot.h"
 #include "BootLog.h"
 
@@ -383,17 +385,111 @@ static VOID UiDrawLogPanel(UINTN Left, UINTN Top, UINTN Width, UINTN Height, CON
   }
 }
 
+static const CHAR16* UiMemTypeStr(EFI_MEMORY_TYPE Type) {
+  switch (Type) {
+    case EfiReservedMemoryType: return L"reserved";
+    case EfiLoaderCode: return L"loader_code";
+    case EfiLoaderData: return L"loader_data";
+    case EfiBootServicesCode: return L"boot_code";
+    case EfiBootServicesData: return L"boot_data";
+    case EfiRuntimeServicesCode: return L"rt_code";
+    case EfiRuntimeServicesData: return L"rt_data";
+    case EfiConventionalMemory: return L"conventional";
+    case EfiUnusableMemory: return L"unusable";
+    case EfiACPIReclaimMemory: return L"acpi_reclaim";
+    case EfiACPIMemoryNVS: return L"acpi_nvs";
+    case EfiMemoryMappedIO: return L"mmio";
+    case EfiMemoryMappedIOPortSpace: return L"mmio_port";
+    case EfiPalCode: return L"pal";
+    case EfiPersistentMemory: return L"persistent";
+    default: return L"unknown";
+  }
+}
+
+static VOID UiDrawMemMap(UINTN Left, UINTN Top, UINTN Height) {
+  UINTN mmap_size = 0;
+  UINTN map_key = 0;
+  UINTN desc_size = 0;
+  UINT32 desc_version = 0;
+  EFI_STATUS Status = gBS->GetMemoryMap(&mmap_size, NULL, &map_key, &desc_size, &desc_version);
+  if (Status != EFI_BUFFER_TOO_SMALL || desc_size == 0) {
+    UiPrintAt(Left + 2, Top, L"memory map unavailable");
+    return;
+  }
+
+  mmap_size += desc_size * 8;
+  EFI_MEMORY_DESCRIPTOR* mmap = AllocatePool(mmap_size);
+  if (!mmap) {
+    UiPrintAt(Left + 2, Top, L"memory map alloc failed");
+    return;
+  }
+
+  Status = gBS->GetMemoryMap(&mmap_size, mmap, &map_key, &desc_size, &desc_version);
+  if (EFI_ERROR(Status)) {
+    FreePool(mmap);
+    UiPrintAt(Left + 2, Top, L"memory map read failed: %r", Status);
+    return;
+  }
+
+  UINTN count = mmap_size / desc_size;
+  UINTN show = (count > 5) ? 5 : count;
+  UINTN start = (count > show) ? (count - show) : 0;
+  UINTN row = Top;
+
+  UiPrintAt(Left + 2, row++, L"memory map (last %u of %u)", (UINT32)show, (UINT32)count);
+  for (UINTN i = start; i < count && row < (Top + Height); ++i) {
+    EFI_MEMORY_DESCRIPTOR* d = (EFI_MEMORY_DESCRIPTOR*)((UINT8*)mmap + (i * desc_size));
+    UiPrintAt(Left + 2, row++, L"[%u] %-12s %08lx %08lx %016lx",
+              (UINT32)i, UiMemTypeStr(d->Type),
+              (UINT64)d->PhysicalStart,
+              (UINT64)d->NumberOfPages,
+              (UINT64)d->Attribute);
+  }
+
+  FreePool(mmap);
+}
+
 static VOID UiRenderStatus(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
   UiDrawContentHeader(Left, Top, Width, L"status / diagnostics");
   UINTN row = Top + 3;
   CHAR16 vendor[16];
   AsciiToLowerUtf16(Ctx->Handoff->Vendor, vendor, 16);
 
+  EFI_LOADED_IMAGE_PROTOCOL* LoadedImage = NULL;
+  CHAR16* file_path = NULL;
+  if (!EFI_ERROR(gBS->HandleProtocol(Ctx->ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID**)&LoadedImage)) && LoadedImage) {
+    file_path = ConvertDevicePathToText(LoadedImage->FilePath, TRUE, TRUE);
+  }
+
   UiPrintAt(Left + 2, row++, L"platform");
   UiPrintAt(Left + 4, row++, L"cpu vendor: %s", vendor);
   UiPrintAt(Left + 4, row++, L"virtualization: %s", (Ctx->Handoff->Features.Vmx || Ctx->Handoff->Features.Svm) ? L"supported" : L"unavailable");
   UiPrintAt(Left + 4, row++, L"ept support: %s", Ctx->Handoff->Features.Ept ? L"yes" : L"no");
   UiPrintAt(Left + 4, row++, L"npt support: %s", Ctx->Handoff->Features.Npt ? L"yes" : L"no");
+
+  row++;
+  UiPrintAt(Left + 2, row++, L"loader image");
+  if (LoadedImage) {
+    UiPrintAt(Left + 4, row++, L"image handle: %p", Ctx->ImageHandle);
+    UiPrintAt(Left + 4, row++, L"image base  : %p", LoadedImage->ImageBase);
+    UiPrintAt(Left + 4, row++, L"image size  : 0x%lx", (UINT64)LoadedImage->ImageSize);
+    UiPrintAt(Left + 4, row++, L"device      : %p", LoadedImage->DeviceHandle);
+    UiPrintAt(Left + 4, row++, L"file path   : %s", file_path ? file_path : L"(unknown)");
+  } else {
+    UiPrintAt(Left + 4, row++, L"loaded image protocol unavailable");
+  }
+
+  row++;
+  UiPrintAt(Left + 2, row++, L"handoff");
+  UiPrintAt(Left + 4, row++, L"handoff ptr : %p", Ctx->Handoff);
+  UiPrintAt(Left + 4, row++, L"config ptr  : %p", Ctx->Config);
+  UiPrintAt(Left + 4, row++, L"features    : vmx=%u ept=%u vpid=%u svm=%u npt=%u",
+            (UINT32)Ctx->Handoff->Features.Vmx,
+            (UINT32)Ctx->Handoff->Features.Ept,
+            (UINT32)Ctx->Handoff->Features.Vpid,
+            (UINT32)Ctx->Handoff->Features.Svm,
+            (UINT32)Ctx->Handoff->Features.Npt);
+  UiPrintAt(Left + 4, row++, L"cr3 (pml4)  : 0x%llx", (UINT64)AsmReadCr3());
 
   row++;
   UiPrintAt(Left + 2, row++, L"current config");
@@ -420,11 +516,12 @@ static VOID UiRenderStatus(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, 
     UiPrintAt(Left + 4, row++, L"no previous boot status found");
   }
 
-  if (Height > 20) {
-    UINTN log_top = Top + (Height > 10 ? (Height - 10) : (Top + row));
-    if (log_top < row + 1) log_top = row + 1;
-    UiDrawLogPanel(Left, log_top, Width, Height - (log_top - Top), L"boot log (latest)");
+  row++;
+  if (row + 6 < Top + Height) {
+    UiDrawMemMap(Left, row, (Top + Height) - row);
   }
+
+  if (file_path) FreePool(file_path);
 }
 
 static VOID UiRenderLogs(UI_CONTEXT* Ctx, UINTN Left, UINTN Top, UINTN Width, UINTN Height) {
