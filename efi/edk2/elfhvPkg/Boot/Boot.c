@@ -240,6 +240,8 @@ LoadAndStartImage(EFI_HANDLE ImageHandle, EFI_HANDLE* OutHandle, CONST CHAR16* P
     return Status;
   }
 
+  // change the path of the IMAGE_BASE to the hander exit module
+  // use DeviceHandle to another path as the boot manager will not send
   DevicePath = FileDevicePath(LoadedImage->DeviceHandle, (CHAR16*)Path);
   File->Close(File);
   Root->Close(Root);
