@@ -1,4 +1,4 @@
-set-executionpolicy -scope process -executionpolicy bypass .\elfhv_all_in_one.ps1 -efipath C:\Users\admin\Downloads\elfhv.efi
+Released Publically.
 
 # elf hypervisor
 
