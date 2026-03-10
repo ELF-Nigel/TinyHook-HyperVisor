@@ -3,6 +3,7 @@
 #include <Library/MemoryAllocationLib.h>
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/UefiBootServicesTableLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
 #include <Guid/Acpi.h>
 #include <IndustryStandard/Acpi.h>
