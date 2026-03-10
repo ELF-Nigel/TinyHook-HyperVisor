@@ -73,9 +73,9 @@ See `docs/README.md` for full documentation.
 - [x] add secure boot chain measurement (TPM event log).
 - [x] add config UI in EFI (simple key-toggle menu).
 - [x] add handoff-to-kernel apply policy (feature gating and logging).
-- add EFI config variable sanity checker and recovery defaults.
-- add minimal ACPI table handoff (metadata only).
-- add per-cpu watchdog for launch failures.
+- [x] add EFI config variable sanity checker and recovery defaults.
+- [x] add minimal ACPI table handoff (metadata only).
+- [x] add per-cpu watchdog for launch failures.
 - add unit-test style self-checks for alloc and paging helpers.
 - add vmexit reason string table for diagnostics.
 - add io/cpuid table export helpers for debugging.
