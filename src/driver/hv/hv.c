@@ -8,6 +8,19 @@
 
 hv_stats_t g_hv_stats = {0};
 
+static const ULONG hv_launch_fail_limit = 3;
+
+static ULONG64 hv_now_ticks(void) {
+    return KeQueryInterruptTime();
+}
+
+static void hv_record_launch_failure(hv_cpu_t* cpu, NTSTATUS st) {
+    if (!cpu) return;
+    cpu->launch_failures += 1;
+    cpu->last_launch_status = st;
+    cpu->last_launch_time = hv_now_ticks();
+}
+
 static ULONG hv_get_cpu_count(void) {
     return KeQueryActiveProcessorCountEx(ALL_PROCESSOR_GROUPS);
 }
@@ -259,15 +272,30 @@ int hv_start(hv_state_t* hv) {
     if (!hv || !hv->initialized) return STATUS_INVALID_PARAMETER;
     // per-cpu launch (skeleton)
     for (ULONG i = 0; i < hv->cpu_count; ++i) {
+        if (hv->cpus[i].launch_failures >= hv_launch_fail_limit) {
+            hv_log("[launch] cpu %lu blocked by watchdog (failures=%lu)\n",
+                   i, hv->cpus[i].launch_failures);
+            return STATUS_DEVICE_HARDWARE_ERROR;
+        }
         if (hv->cpu_vendor == HV_CPU_VENDOR_INTEL) {
             if (!hv->cpus[i].vmx.vmx_on || !hv->cpus[i].vmx.vmcs_loaded) return STATUS_INVALID_DEVICE_STATE;
             int st = vmx_launch(&hv->cpus[i].vmx);
-            if (st != STATUS_SUCCESS) { hv_stop(hv); return st; }
+            if (st != STATUS_SUCCESS) {
+                hv_record_launch_failure(&hv->cpus[i], st);
+                hv_stop(hv);
+                return st;
+            }
         } else if (hv->cpu_vendor == HV_CPU_VENDOR_AMD) {
             if (!hv->cpus[i].svm.svm_on) return STATUS_INVALID_DEVICE_STATE;
             int st = svm_launch(&hv->cpus[i].svm);
-            if (st != STATUS_SUCCESS) { hv_stop(hv); return st; }
+            if (st != STATUS_SUCCESS) {
+                hv_record_launch_failure(&hv->cpus[i], st);
+                hv_stop(hv);
+                return st;
+            }
         }
+        hv->cpus[i].last_launch_status = STATUS_SUCCESS;
+        hv->cpus[i].last_launch_time = hv_now_ticks();
         hv->cpus[i].launched = 1;
     }
     return STATUS_SUCCESS;

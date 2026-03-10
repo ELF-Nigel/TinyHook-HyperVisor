@@ -1,4 +1,4 @@
-// handoff.c - EFI handoff reader
+// handoff.c - efi handoff reader
 #include "driver/core/handoff.h"
 
 const GUID g_thv_handoff_guid = { 0x3f7a9fe2, 0x0e84, 0x4de4, {0x86,0x92,0xa2,0x9f,0x31,0x66,0x6a,0xb5} };

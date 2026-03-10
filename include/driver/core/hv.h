@@ -23,6 +23,9 @@ typedef struct hv_cpu_t {
     svm_state_t svm;
     int cpu_id;
     int launched;
+    ULONG launch_failures;
+    NTSTATUS last_launch_status;
+    ULONG64 last_launch_time;
     ULONG64 cr0;
     ULONG64 cr3;
     ULONG64 cr4;

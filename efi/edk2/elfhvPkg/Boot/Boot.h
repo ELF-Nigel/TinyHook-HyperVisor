@@ -1,4 +1,4 @@
-// Boot.h - shared bootloader helpers
+// boot.h - shared bootloader helpers
 #pragma once
 #include <Uefi.h>
 
@@ -37,6 +37,14 @@ typedef struct THV_CONFIG {
 } THV_CONFIG;
 #pragma pack(pop)
 
+typedef struct THV_ACPI_INFO {
+  UINT64 RsdpAddress;
+  UINT64 RsdtAddress;
+  UINT64 XsdtAddress;
+  UINT8 Revision;
+  UINT8 Reserved[7];
+} THV_ACPI_INFO;
+
 typedef struct THV_HANDOFF {
   UINT32 Signature;
   UINT32 Version;
@@ -45,6 +53,7 @@ typedef struct THV_HANDOFF {
   CHAR8 Vendor[13];
   THV_FEATURES Features;
   THV_CONFIG Config;
+  THV_ACPI_INFO Acpi;
 } THV_HANDOFF;
 
 #pragma pack(push, 1)
@@ -59,9 +68,10 @@ typedef struct ELF_BOOT_STATUS {
 } ELF_BOOT_STATUS;
 #pragma pack(pop)
 
-#define THV_HANDOFF_SIGNATURE 0x56484F54u // 'THOV'
-#define THV_HANDOFF_VERSION   0x0001
+#define THV_HANDOFF_SIGNATURE 0x56484F54u // 'thov'
+#define THV_HANDOFF_VERSION   0x0002
 
+extern EFI_GUID gThvConfigGuid;
 extern EFI_GUID gThvHandoffGuid;
 extern EFI_GUID gElfBootStatusGuid;
 
