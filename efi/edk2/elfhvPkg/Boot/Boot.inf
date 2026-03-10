@@ -40,3 +40,5 @@
 
 [Guids]
   gEfiFileInfoGuid
+  gEfiAcpi10TableGuid
+  gEfiAcpi20TableGuid

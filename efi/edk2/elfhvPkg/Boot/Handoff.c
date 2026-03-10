@@ -30,7 +30,7 @@ static VOID FillAcpiInfo(THV_HANDOFF* Handoff) {
   }
   if (!Rsdp) {
     for (UINTN i = 0; i < Count; ++i) {
-      if (CompareGuid(&Tables[i].VendorGuid, &gEfiAcpiTableGuid)) {
+      if (CompareGuid(&Tables[i].VendorGuid, &gEfiAcpi10TableGuid)) {
         Rsdp = Tables[i].VendorTable;
         break;
       }
