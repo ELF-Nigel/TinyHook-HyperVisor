@@ -1,6 +1,7 @@
 // hv.c - hypervisor core (skeleton)
 #include "driver/core/hv.h"
 #include "driver/util/alloc.h"
+#include "driver/util/paging.h"
 #include "driver/util/regs.h"
 #include "driver/util/log.h"
 #include <intrin.h>
@@ -9,6 +10,138 @@
 hv_stats_t g_hv_stats = {0};
 
 static const ULONG hv_launch_fail_limit = 3;
+
+static NTSTATUS hv_selftest_fail(const char* suite, const char* check) {
+    hv_log("[selftest] %s failed: %s\n", suite, check);
+    NT_ASSERTMSG(check, FALSE);
+    return STATUS_UNSUCCESSFUL;
+}
+
+static NTSTATUS hv_selftest_alloc_helpers(void) {
+    NTSTATUS st;
+    void* page;
+    void* raw;
+    UCHAR dst[8];
+    UCHAR src[4] = {1, 2, 3, 4};
+    UINT64 marker;
+    PHYSICAL_ADDRESS pa;
+
+    page = hv_alloc_page_aligned(96, 'tShH');
+    if (!page) return hv_selftest_fail("alloc", "hv_alloc_page_aligned returned NULL");
+    if (!hv_is_page_aligned(page)) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "page-aligned allocation was not aligned");
+    }
+
+    raw = ((void**)page)[-1];
+    if (!raw || raw == page) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "aligned allocation metadata was not preserved");
+    }
+
+    pa.QuadPart = PAGE_SIZE * 4;
+    if (!hv_is_phys_page_aligned(pa)) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "aligned physical address was rejected");
+    }
+
+    pa.QuadPart += 1;
+    if (hv_is_phys_page_aligned(pa)) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "unaligned physical address was accepted");
+    }
+
+    marker = ~0ull;
+    hv_zero_struct(&marker, sizeof(marker));
+    if (marker != 0) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "hv_zero_struct did not zero the buffer");
+    }
+
+    RtlZeroMemory(dst, sizeof(dst));
+    st = hv_memcpy_checked(dst, sizeof(dst), src, sizeof(src));
+    if (!NT_SUCCESS(st) || RtlCompareMemory(dst, src, sizeof(src)) != sizeof(src)) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "hv_memcpy_checked did not copy a fitting buffer");
+    }
+
+    st = hv_memcpy_checked(dst, sizeof(dst), src, sizeof(dst) + 1);
+    if (st != STATUS_BUFFER_TOO_SMALL) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "hv_memcpy_checked missed oversize detection");
+    }
+
+    st = hv_memcpy_checked(NULL, sizeof(dst), src, sizeof(src));
+    if (st != STATUS_INVALID_PARAMETER) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "hv_memcpy_checked missed null destination");
+    }
+
+    if (hv_min_u64(9, 3) != 3 || hv_max_u64(9, 3) != 9) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "min/max helpers returned unexpected values");
+    }
+
+    if (!hv_is_canonical_addr(0x00007FFFFFFFFFFFULL) ||
+        !hv_is_canonical_addr(0xFFFF800000000000ULL) ||
+        hv_is_canonical_addr(0x0000800000000000ULL) ||
+        hv_is_canonical_addr(0xFFFF7FFFFFFFFFFFULL)) {
+        hv_free_page_aligned(page, 'tShH');
+        return hv_selftest_fail("alloc", "canonical address helper classified an address incorrectly");
+    }
+
+    hv_free_page_aligned(page, 'tShH');
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS hv_selftest_paging_helpers(void) {
+    UINT64 va;
+
+    if (sizeof(PML4_Entry) != sizeof(UINT64) ||
+        sizeof(PDP_Entry) != sizeof(UINT64) ||
+        sizeof(PD_Entry) != sizeof(UINT64) ||
+        sizeof(PT_Entry) != sizeof(UINT64)) {
+        return hv_selftest_fail("paging", "paging entries are not 64-bit wide");
+    }
+
+    va = ((UINT64)0x1A5 << 39) |
+         ((UINT64)0x12C << 30) |
+         ((UINT64)0x055 << 21) |
+         ((UINT64)0x0F3 << 12) |
+         0x0A5;
+
+    if (hv_pml4_index(va) != 0x1A5 ||
+        hv_pdpt_index(va) != 0x12C ||
+        hv_pd_index(va) != 0x055 ||
+        hv_pt_index(va) != 0x0F3 ||
+        hv_page_offset(va) != 0x0A5) {
+        return hv_selftest_fail("paging", "virtual address index helpers returned incorrect values");
+    }
+
+    va = 0xFFFF8123456789ABULL;
+    if (hv_pml4_index(va) > 0x1FF ||
+        hv_pdpt_index(va) > 0x1FF ||
+        hv_pd_index(va) > 0x1FF ||
+        hv_pt_index(va) > 0x1FF ||
+        hv_page_offset(va) > 0xFFF) {
+        return hv_selftest_fail("paging", "paging helper masks overflowed their field widths");
+    }
+
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS hv_run_selftests(void) {
+    NTSTATUS st;
+
+    st = hv_selftest_alloc_helpers();
+    if (!NT_SUCCESS(st)) return st;
+
+    st = hv_selftest_paging_helpers();
+    if (!NT_SUCCESS(st)) return st;
+
+    hv_log("[selftest] alloc/paging helpers passed\n");
+    return STATUS_SUCCESS;
+}
 
 static ULONG64 hv_now_ticks(void) {
     return KeQueryInterruptTime();
@@ -51,8 +184,13 @@ static hv_cpu_vendor_t hv_detect_cpu_vendor(void) {
 }
 
 int hv_init(hv_state_t* hv) {
+    NTSTATUS st;
+
     if (!hv) return STATUS_INVALID_PARAMETER;
     if (hv->initialized) return STATUS_ALREADY_COMPLETE;
+
+    st = hv_run_selftests();
+    if (!NT_SUCCESS(st)) return st;
 
     hv_feature_register_defaults();
 
