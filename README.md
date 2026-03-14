@@ -1,5 +1,3 @@
-Released Publically.
-
 # elf hypervisor
 
 See `docs/README.md` for full documentation.
